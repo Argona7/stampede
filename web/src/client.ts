@@ -16,8 +16,8 @@ export const api = {
   status: () => get<Status>('/api/status'),
   graph: (window_s: number, from: number | null, to: number | null, minWallets: number, limit = 250) =>
     get<Graph>(`/api/graph?${q({ window: `${window_s}s`, from, to, min_wallets: minWallets, limit })}`),
-  edge: (a: string, b: string, window_s: number, from: number | null, to: number | null, limit = 60) =>
-    get<EdgeDetail>(`/api/edge/${a}/${b}?${q({ window: `${window_s}s`, from, to, limit, exact: 1 })}`),
+  edge: (a: string, b: string, window_s: number, from: number | null, to: number | null, limit = 60, exact = true) =>
+    get<EdgeDetail>(`/api/edge/${a}/${b}?${q({ window: `${window_s}s`, from, to, limit, exact: exact ? 1 : 0 })}`),
   token: (addr: string, window_s: number, from: number | null, to: number | null) =>
     get<TokenDetail>(`/api/token/${addr}?${q({ window: `${window_s}s`, from, to })}`),
   search: (text: string) => get<TokenLabel[]>(`/api/search?${q({ q: text })}`),

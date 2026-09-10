@@ -4,8 +4,10 @@ export interface Status {
   mode: Mode
   mode_label: string
   chain: { id: number; name: string; explorer: string }
-  sample: { label: string; from_block: number; to_block: number; from_ts: number | null; to_ts: number | null }
+  sample: { label: string; from_block: number; to_block: number; from_ts: number | null; to_ts: number | null; trades?: number; wallets?: number; tokens?: number; scope?: string }
+  store: { first_ts: number | null; last_ts: number | null; last_block: number | null; trades: number; trades_with_time: number; unknown_time_trades: number; scope: string }
   data: { first_ts: number | null; last_ts: number | null; last_block: number | null; trades: number; age_s: number | null; server_time: number }
+  session: SessionState
   source: string | null
   coverage: {
     ingest_path: string | null
@@ -25,7 +27,7 @@ export interface Status {
   }
   live: null | { running: boolean; paused: boolean; ticks: number; last_error: string | null; head_block: number | null; head_lag_s: number | null; last_block: number | null; last_ts: number | null; tick_ms: number | null }
   default_window_s: number
-  connection: 'ok' | 'error' | 'static'
+  connection: 'ok' | 'error' | 'static' | 'stale'
 }
 
 export interface GNode {
@@ -39,8 +41,10 @@ export interface GNode {
   buyers: number
   sellers: number
   last_trade_ts: number | null
-  in_wallets: number
-  out_wallets: number
+  in_edge_wallet_sum: number
+  out_edge_wallet_sum: number
+  in_unique_wallets: number
+  out_unique_wallets: number
 }
 
 export interface GEdge {
@@ -74,7 +78,7 @@ export interface Graph {
   nodes: GNode[]
   edges: GEdge[]
   recent: Recent[]
-  totals: { sequences_in_range: number; wallets_in_range: number; edges_returned: number; truncated: boolean }
+  totals: { sequences_in_range: number; wallets_in_range: number; wallets_main_in_range: number; edges_returned: number; edges_matching: number; truncated: boolean }
 }
 
 export interface Trade {
@@ -155,3 +159,51 @@ export interface TokenDetail {
 }
 
 export type Selection = { kind: 'edge'; from: string; to: string } | { kind: 'token'; address: string } | null
+
+export interface SessionState {
+  id: string
+  rev: number
+  mode: Mode
+  label: string
+  clock_ts: number | null
+  playing: boolean
+  speed: number
+  span_s: number
+  window_s: number
+  from_ts: number | null
+  to_ts: number | null
+  at_end: boolean | null
+  server_time: number
+  controls: boolean
+  live_paused?: boolean
+}
+
+export interface SeqEvent {
+  id: number
+  cursor: string
+  buy_ts: number
+  buy_ts_exact: boolean
+  sell_ts: number
+  wallet: string
+  from: string
+  to: string
+  from_symbol: string
+  to_symbol: string
+  from_short: string
+  to_short: string
+  grade: 'direct' | 'clean' | 'ambiguous'
+  gap_s: number
+  buy_tx: string
+  sell_tx: string
+}
+
+export interface EventsPage {
+  kind: 'history' | 'new'
+  window_s: number
+  until: number
+  count: number
+  events: SeqEvent[]
+  next_cursor: string
+  has_more: boolean
+  session: SessionState
+}

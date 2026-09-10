@@ -8,6 +8,7 @@ interface Props {
   loading: boolean
   error: string | null
   onSelect: (s: Selection) => void
+  freshRows?: Set<string>
 }
 
 const venueName = (v: string) => (v === 'curve' ? 'on the PONS bonding curve' : v === 'v4' ? 'in the Uniswap v4 pool' : 'on the curve and the v4 pool')
@@ -28,9 +29,9 @@ function Leg({ t, label }: { t: Trade; label: string }) {
   )
 }
 
-function SequenceRow({ s }: { s: Sequence }) {
+export function SequenceRow({ s, fresh = false }: { s: Sequence; fresh?: boolean }) {
   return (
-    <div className="seq">
+    <div className={`seq ${fresh ? 'fresh' : ''}`}>
       <div className="head">
         <span className="mono">
           <a href={s.wallet_url} target="_blank" rel="noreferrer">
@@ -54,7 +55,7 @@ function SequenceRow({ s }: { s: Sequence }) {
   )
 }
 
-export default function Details({ selection, edge, token, loading, error, onSelect }: Props) {
+export default function Details({ selection, edge, token, loading, error, onSelect, freshRows }: Props) {
   if (!selection) {
     return (
       <aside className="detail">
@@ -107,7 +108,7 @@ export default function Details({ selection, edge, token, loading, error, onSele
           {edge.truncated ? `, ${edge.sequences.length} most recent shown` : ''}. A wallet appears once per sequence, so this can exceed the wallet count.
         </h2>
         {edge.sequences.map((s) => (
-          <SequenceRow key={s.id} s={s} />
+          <SequenceRow key={s.id} s={s} fresh={!!freshRows?.has(String(s.id))} />
         ))}
       </aside>
     )

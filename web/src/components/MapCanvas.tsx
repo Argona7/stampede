@@ -153,21 +153,21 @@ export default function MapCanvas({ nodes, edges, selection, showAmbiguous, fres
       const pulse = freshAt !== undefined ? Math.max(0, 1 - (now - freshAt) / PULSE_MS) : 0
       const alpha = ambOnly ? 0.16 : 0.14 + Math.min(0.72, 0.09 * Math.sqrt(l.main))
       let width = ambOnly ? 0.8 : 0.8 + Math.min(9, 1.6 * Math.sqrt(l.main))
-      let color = `rgba(228,232,238,${alpha})`
+      let color = `rgba(242,242,242,${alpha})`
       if (hasFocus) {
         if (isSel) {
-          color = 'rgba(224,184,92,0.95)'
+          color = 'rgba(255,51,68,0.95)'
           width += 1.5
         } else if (touches) {
-          color = `rgba(228,232,238,${Math.min(0.85, alpha + 0.35)})`
+          color = `rgba(242,242,242,${Math.min(0.85, alpha + 0.35)})`
         } else {
-          color = `rgba(228,232,238,${alpha * 0.28})`
+          color = `rgba(242,242,242,${alpha * 0.28})`
         }
       } else if (isHov) {
-        color = `rgba(228,232,238,${Math.min(0.9, alpha + 0.4)})`
+        color = `rgba(242,242,242,${Math.min(0.9, alpha + 0.4)})`
       }
       if (pulse > 0) {
-        color = `rgba(224,184,92,${0.35 + 0.6 * pulse})`
+        color = `rgba(255,51,68,${0.35 + 0.6 * pulse})`
         width += 3 * pulse
       }
       const { cx, cy } = curve(s, t)
@@ -208,10 +208,10 @@ export default function MapCanvas({ nodes, edges, selection, showAmbiguous, fres
       const dim = hasFocus && !connected.has(n.id) && !isSel
       ctx.beginPath()
       ctx.arc(n.x!, n.y!, radiusFor(n.r, k), 0, Math.PI * 2)
-      ctx.fillStyle = dim ? 'rgba(140,148,160,0.3)' : isSel ? '#e0b85c' : 'rgba(178,187,198,0.92)'
+      ctx.fillStyle = dim ? 'rgba(116,116,116,0.3)' : isSel ? '#FF3344' : 'rgba(163,163,163,0.92)'
       ctx.fill()
       ctx.lineWidth = (isSel || isHov ? 2 : 1) / k
-      ctx.strokeStyle = isSel ? '#e0b85c' : isHov ? '#e4e8ee' : 'rgba(14,17,22,0.9)'
+      ctx.strokeStyle = isSel ? '#FF3344' : isHov ? '#f2f2f2' : 'rgba(5,5,5,0.9)'
       ctx.stroke()
     }
     // labels (after all nodes so they sit on top)
@@ -226,12 +226,12 @@ export default function MapCanvas({ nodes, edges, selection, showAmbiguous, fres
       const dim = hasFocus && !connected.has(n.id) && !isSel && !inEdge
       const fs = (isSel || inEdge ? 13 : 11.5) / k
       ctx.font = `${isSel || inEdge ? 600 : 500} ${fs}px 'Bricolage Grotesque Variable', system-ui, sans-serif`
-      ctx.fillStyle = dim ? 'rgba(163,171,182,0.35)' : isSel || inEdge ? '#e4e8ee' : 'rgba(228,232,238,0.82)'
+      ctx.fillStyle = dim ? 'rgba(163,163,163,0.35)' : isSel || inEdge ? '#f2f2f2' : 'rgba(242,242,242,0.82)'
       const rr = radiusFor(n.r, k)
       ctx.fillText(n.symbol, n.x!, n.y! + rr + 3 / k)
       if (isSel || isHov || inEdge) {
         ctx.font = `${10.5 / k}px 'IBM Plex Mono', ui-monospace, monospace`
-        ctx.fillStyle = 'rgba(163,171,182,0.9)'
+        ctx.fillStyle = 'rgba(163,163,163,0.9)'
         ctx.fillText(n.short, n.x!, n.y! + rr + 3 / k + fs + 2 / k)
       }
     }

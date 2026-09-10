@@ -1,17 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './client'
+import Caption from './components/Caption'
 import Controls, { type Filters } from './components/Controls'
-import Details from './components/Details'
+import Details, { SequenceRow } from './components/Details'
 import MapCanvas from './components/MapCanvas'
 import Ticker from './components/Ticker'
-import TopBar from './components/TopBar'
-import type { EdgeDetail, Graph, Selection, Status, TokenDetail } from './types'
+import TopStrip from './components/TopStrip'
+import Scene3D, { type PerfStats, type Pulse, type ViewState } from './scene/Scene3D'
+import { sessionApi } from './session'
+import type { EdgeDetail, Graph, Recent, Selection, SeqEvent, SessionState, Status, TokenDetail } from './types'
 
-const POLL_MS = 3000
+const SESSION_POLL_MS = 1000
+const EVENTS_POLL_MS = 1500
+const STATUS_POLL_MS = 5000
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 export default function App() {
+  const params = new URLSearchParams(window.location.search)
   const [status, setStatus] = useState<Status | null>(null)
   const [statusError, setStatusError] = useState<string | null>(null)
+  const [session, setSession] = useState<SessionState | null>(null)
   const [graph, setGraph] = useState<Graph | null>(null)
   const [filters, setFilters] = useState<Filters>({ windowS: 1800, spanS: 1800, toTs: null, minWallets: 3, showAmbiguous: false })
   const [selection, setSelection] = useState<Selection>(null)
@@ -21,18 +30,23 @@ export default function App() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
   const [focusNonce, setFocusNonce] = useState(0)
-  const [fresh, setFresh] = useState<Map<string, number>>(new Map())
+  const [pulses, setPulses] = useState<Pulse[]>([])
   const [freshRows, setFreshRows] = useState<Set<string>>(new Set())
-  const [playing, setPlaying] = useState(false)
-  const [speed, setSpeed] = useState(10)
-  const seenRows = useRef<Set<string> | null>(null)
-  const clockRef = useRef<number | null>(null)
+  const [feed, setFeed] = useState<SeqEvent[]>([])
+  const [layout, setLayout] = useState<'explore' | 'presentation'>(params.get('layout') === 'presentation' ? 'presentation' : 'explore')
+  const [renderer, setRenderer] = useState<'3d' | '2d'>(params.get('renderer') === '2d' ? '2d' : '3d')
+  const [viewState, setViewState] = useState<ViewState>('overview')
+  const [evidenceOpen, setEvidenceOpen] = useState(false)
+  const [perf, setPerf] = useState<PerfStats | null>(null)
+  const [reduced] = useState(prefersReducedMotion() || params.get('motion') === 'reduce')
+  const cursorRef = useRef<string | null>(null)
+  const lastClockRef = useRef<{ clock: number; wall: number; id: string } | null>(null)
   const inFlight = useRef(false)
-  const pendingRef = useRef(false)
+  const showPerf = params.get('perf') === '1'
 
-  const mode = status?.mode ?? 'fixture'
+  const mode = session?.mode ?? status?.mode ?? 'fixture'
 
-  // ---- status polling ----
+  // ---- status (coverage, live health) ----
   useEffect(() => {
     let alive = true
     const tick = () =>
@@ -42,126 +56,125 @@ export default function App() {
           if (!alive) return
           setStatus(s)
           setStatusError(null)
-          setFilters((f) => (f.windowS === 1800 && s.default_window_s && s.default_window_s !== 1800 ? { ...f, windowS: s.default_window_s } : f))
         })
-        .catch((e) => alive && setStatusError(String(e)))
+        .catch((e) => alive && setStatusError(String(e.message ?? e)))
     tick()
-    const id = window.setInterval(tick, mode === 'live' ? POLL_MS : 15000)
+    const id = window.setInterval(tick, STATUS_POLL_MS)
     return () => {
       alive = false
       window.clearInterval(id)
     }
-  }, [mode])
+  }, [])
 
-  // sample bounds for the range slider
-  const bounds = useMemo(() => {
-    if (!status) return null
-    const min = status.sample.from_ts ?? status.data.first_ts
-    const max = mode === 'live' ? status.data.last_ts : status.sample.to_ts ?? status.data.last_ts
-    if (!min || !max) return null
-    return { min, max }
-  }, [status, mode])
-
-  // initial `to`: end of sample (fixture), start + span (replay), moving head (live)
+  // ---- shared session clock (server-side, same for TUI and web) ----
   useEffect(() => {
-    if (!bounds) return
-    setFilters((f) => {
-      if (mode === 'live') return { ...f, toTs: bounds.max }
-      if (f.toTs !== null) return f
-      return { ...f, toTs: mode === 'replay' ? Math.min(bounds.max, bounds.min + f.spanS) : bounds.max }
-    })
-  }, [bounds, mode])
-
-  // ---- replay clock ----
-  useEffect(() => {
-    if (mode !== 'replay' || !playing || !bounds) return
-    let last = performance.now()
-    const id = window.setInterval(() => {
-      const now = performance.now()
-      const dt = ((now - last) / 1000) * speed
-      last = now
-      setFilters((f) => {
-        const cur = f.toTs ?? bounds.min
-        const next = Math.min(bounds.max, Math.round(cur + dt))
-        if (next >= bounds.max) setPlaying(false)
-        return { ...f, toTs: next }
-      })
-    }, 1000)
-    return () => window.clearInterval(id)
-  }, [mode, playing, speed, bounds])
-
-  // ---- graph fetch ----
-  const toTs = filters.toTs
-  const fromTs = toTs !== null ? toTs - filters.spanS : null
-  clockRef.current = toTs
-  useEffect(() => {
-    if (toTs === null && mode !== 'live') return
     let alive = true
-    let timer: number | null = null
-    const load = () => {
-      if (inFlight.current) {
-        // one request at a time; the newest range wins when it finishes
-        pendingRef.current = true
-        return
-      }
+    const tick = () =>
+      sessionApi
+        .get()
+        .then((s) => {
+          if (!alive) return
+          setSession(s)
+          setStatusError(null)
+          setFilters((f) => (f.windowS !== s.window_s || f.spanS !== s.span_s ? { ...f, windowS: s.window_s, spanS: s.span_s } : f))
+        })
+        .catch((e) => alive && setStatusError(String(e.message ?? e)))
+    tick()
+    const id = window.setInterval(tick, SESSION_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [])
+
+  const control = useCallback((action: string, extra: Record<string, number | undefined> = {}) => {
+    sessionApi
+      .control(action, extra)
+      .then(setSession)
+      .catch((e) => setStatusError(String(e.message ?? e)))
+  }, [])
+
+  // the visible range ends at the shared clock (replay/fixture) or the last indexed block (live)
+  const liveLastTs = status?.data.last_ts ?? null
+  const toTs = mode === 'live' ? liveLastTs : session?.clock_ts ?? null
+  const fromTs = toTs !== null ? toTs - filters.spanS : null
+
+  // ---- graph snapshot for the range ----
+  useEffect(() => {
+    if (toTs === null) return
+    let alive = true
+    const t = window.setTimeout(() => {
+      if (inFlight.current) return
       inFlight.current = true
       api
-        .graph(filters.windowS, fromTs, toTs, filters.minWallets, 260)
-        .then((g) => {
-          if (!alive) return
-          setGraph(g)
-          // fresh rows: sequences not seen in the previous fetch (replay/live only)
-          const ids = new Set(g.recent.map((r) => `${r.buy_tx}-${r.from}`))
-          if (seenRows.current && mode !== 'fixture') {
-            const newRows = new Set<string>()
-            const newEdges = new Map(fresh)
-            const now = performance.now()
-            for (const r of g.recent) {
-              const id = `${r.buy_tx}-${r.from}`
-              if (!seenRows.current.has(id)) {
-                newRows.add(id)
-                newEdges.set(`${r.from}->${r.to}`, now)
-              }
-            }
-            if (newRows.size) {
-              setFreshRows(newRows)
-              setFresh(newEdges)
-              window.setTimeout(() => setFreshRows(new Set()), 2500)
-            }
-          }
-          seenRows.current = ids
-        })
+        .graph(filters.windowS, fromTs, toTs, filters.minWallets, 300)
+        .then((g) => alive && setGraph(g))
         .catch(() => {})
         .finally(() => {
           inFlight.current = false
-          if (pendingRef.current && alive) {
-            pendingRef.current = false
-            load()
-          }
         })
-    }
-    // debounce: the range slider and the replay clock change `to` often
-    timer = window.setTimeout(load, mode === 'replay' ? 250 : 120)
-    if (mode === 'live') {
-      const id = window.setInterval(load, POLL_MS)
-      return () => {
-        alive = false
-        if (timer) window.clearTimeout(timer)
-        window.clearInterval(id)
-      }
-    }
+    }, 150)
     return () => {
       alive = false
-      if (timer) window.clearTimeout(timer)
+      window.clearTimeout(t)
+    }
+  }, [filters.windowS, filters.minWallets, fromTs, toTs])
+
+  // ---- event stream: history after a seek, new events otherwise (pulses only for new) ----
+  useEffect(() => {
+    if (!session) return
+    let alive = true
+    const poll = async () => {
+      const clock = mode === 'live' ? liveLastTs : session.clock_ts
+      if (clock === null) return
+      const last = lastClockRef.current
+      const seek = !last || last.id !== session.id || clock < last.clock - 1 || clock > last.clock + ((Date.now() - last.wall) / 1000 + 2 * EVENTS_POLL_MS / 1000) * (session.speed || 1) + 5
+      try {
+        const after = seek ? null : cursorRef.current
+        let page = await sessionApi.events(session.window_s, clock, after, 2000, session.span_s)
+        const pages = [page]
+        // page to the end: an unfinished history would otherwise be continued as "new" on the next poll
+        while (page.has_more && pages.length < 25) {
+          page = await sessionApi.events(session.window_s, clock, page.next_cursor, 2000, session.span_s)
+          pages.push(page)
+        }
+        const historyOnly = seek || pages[0].kind === 'history'
+        if (!alive) return
+        lastClockRef.current = { clock, wall: Date.now(), id: session.id }
+        cursorRef.current = pages[pages.length - 1].next_cursor
+        const rows = pages.flatMap((p) => p.events)
+        if (historyOnly) {
+          setFeed(rows.slice(-200))
+          setFreshRows(new Set())
+        } else if (rows.length) {
+          setFeed((f) => [...f, ...rows].slice(-200))
+          setFreshRows(new Set(rows.map((r) => String(r.id))))
+          // one pulse per edge per batch: N = accepted rows on that edge in this poll
+          const perEdge = new Map<string, number>()
+          for (const r of rows) perEdge.set(`${r.from}->${r.to}`, (perEdge.get(`${r.from}->${r.to}`) ?? 0) + 1)
+          const at = performance.now()
+          setPulses([...perEdge.entries()].map(([key, count]) => ({ key, count, at })))
+          window.setTimeout(() => alive && setFreshRows(new Set()), 2500)
+        }
+      } catch {
+        /* status poll reports the outage */
+      }
+    }
+    poll()
+    const id = window.setInterval(poll, EVENTS_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.windowS, filters.minWallets, fromTs, toTs, mode, status?.data.last_block])
+  }, [session?.id, session?.rev, session?.clock_ts, session?.playing, mode, liveLastTs])
 
-  // ---- details ----
+  // ---- details for the selection ----
   useEffect(() => {
     if (!selection) {
       setEdge(null)
       setToken(null)
+      setEvidenceOpen(false)
       return
     }
     let alive = true
@@ -169,7 +182,15 @@ export default function App() {
     setDetailError(null)
     const p =
       selection.kind === 'edge'
-        ? api.edge(selection.from, selection.to, filters.windowS, fromTs, toTs).then((d) => alive && (setEdge(d), setToken(null)))
+        ? api
+            .edge(selection.from, selection.to, filters.windowS, fromTs, toTs, 60, false) // fast: counts + rows as stored
+            .then((d) => {
+              if (!alive) return
+              setEdge(d)
+              setToken(null)
+              // then upgrade the same rows with exact block times and tx.from (Alchemy lookups)
+              api.edge(selection.from, selection.to, filters.windowS, fromTs, toTs, 60, true).then((d2) => alive && setEdge(d2)).catch(() => {})
+            })
         : api.token(selection.address, filters.windowS, fromTs, toTs).then((d) => alive && (setToken(d), setEdge(null)))
     p.catch((e) => alive && setDetailError(String(e))).finally(() => alive && setDetailLoading(false))
     return () => {
@@ -179,53 +200,119 @@ export default function App() {
 
   const select = useCallback((s: Selection) => {
     setSelection(s)
-    if (s) setFocusNonce((n) => n + 1)
+    setFocusNonce((n) => n + 1)
+    if (!s) setViewState('overview')
   }, [])
+  // automation hook (demo recording, tests): same code path as a click
+  useEffect(() => {
+    ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing })
+  }, [select, viewState, selection, layout, renderer, graph, session])
 
-  const replay =
-    mode === 'replay' && bounds
-      ? {
-          playing,
-          speed,
-          setPlaying,
-          setSpeed,
-          reset: () => {
-            setPlaying(false)
-            seenRows.current = null
-            setFilters((f) => ({ ...f, toTs: Math.min(bounds.max, bounds.min + f.spanS) }))
-          },
-        }
-      : null
+  // keys: E evidence, Esc back, P presentation, space play/pause
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return
+      if (e.key === 'Escape') select(null)
+      else if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
+      else if (e.key === 'p' || e.key === 'P') setLayout((l) => (l === 'presentation' ? 'explore' : 'presentation'))
+      else if (e.key === ' ' && session?.controls) {
+        e.preventDefault()
+        control('toggle')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [select, control, session?.controls])
 
-  const stale = mode !== 'live'
-  const connError = status?.connection === 'error'
+  const recent: Recent[] = useMemo(
+    () =>
+      [...feed]
+        .reverse()
+        .slice(0, 30)
+        .map((r) => ({ wallet: r.wallet, from: r.from, to: r.to, grade: r.grade, buy_ts: r.buy_ts, gap_s: r.gap_s, buy_tx: r.buy_tx, from_label: r.from_symbol, to_label: r.to_symbol, id: r.id })),
+    [feed],
+  )
+
+  const bounds = useMemo(() => {
+    if (!session) return null
+    if (mode === 'live') return liveLastTs ? { min: liveLastTs - 6 * 3600, max: liveLastTs } : null
+    return session.from_ts && session.to_ts ? { min: session.from_ts, max: session.to_ts } : null
+  }, [session, mode, liveLastTs])
+
+  const edgesShown = graph?.edges.length ?? 0
+  const edgesTotal = graph?.totals.edges_matching ?? 0
+  const presentation = layout === 'presentation'
+  const stale = status?.connection === 'stale'
 
   return (
-    <div className="app">
-      <TopBar status={status} clockTs={mode === 'replay' ? toTs : null} onSelect={select} />
+    <div className={`app ${presentation ? 'presentation' : ''}`}>
+      <TopStrip status={status} session={session} statusError={statusError} layout={layout} renderer={renderer} edgesShown={edgesShown} edgesTotal={edgesTotal} onLayout={setLayout} onRenderer={setRenderer} onControl={control} onSelect={select} />
       <main className="main">
-        <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} replay={replay} />
-        <section className="map" aria-label="Rotation map">
-          <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={fresh} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
-          {stale && status && (
-            <div className="stale">{mode === 'replay' ? `REPLAY · recorded ${status.sample.label}` : `RECORDED · ${status.sample.label}`}</div>
+        {!presentation && <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} session={session} onControl={control} />}
+        <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''}`} aria-label="Rotation map">
+          {renderer === '3d' ? (
+            <Scene3D
+              nodes={graph?.nodes ?? []}
+              edges={graph?.edges ?? []}
+              selection={selection}
+              showAmbiguous={filters.showAmbiguous}
+              pulses={pulses}
+              viewState={viewState}
+              reducedMotion={reduced}
+              onSelect={select}
+              onHover={setHover}
+              onViewState={setViewState}
+              onPerf={setPerf}
+              focusNonce={focusNonce}
+              labelBudget={presentation ? 14 : 22}
+              panelOpen={presentation && evidenceOpen}
+            />
+          ) : (
+            <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={new Map(pulses.map((p) => [p.key, p.at]))} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
           )}
-          {connError && <div className="stale" style={{ color: 'var(--err)', top: 32 }}>Connection error: the map shows the last good block and is not updating.</div>}
-          {statusError && <div className="overlay">API not reachable: {statusError}</div>}
-          {!statusError && graph && graph.edges.length === 0 && <div className="overlay">No edges with at least {filters.minWallets} wallets in this range. Lower the minimum or widen the range.</div>}
+          <div className="corner">
+            <span>
+              <b>{viewState.toUpperCase()}</b>
+            </span>
+            {mode !== 'live' && status && <span>{mode === 'replay' ? 'REPLAY' : 'RECORDED'} · {status.sample.label}</span>}
+            {stale && <span className="badge stale">STALE · data age {status?.data.age_s ?? '?'} s</span>}
+          </div>
+          {showPerf && perf && (
+            <div className="perf">
+              {perf.fps} fps · p50 {perf.p50_ms} ms · p95 {perf.p95_ms} ms · {perf.drawn_edges} edges · {perf.nodes} nodes
+            </div>
+          )}
+          {statusError && <div className="overlay-msg">API not reachable: {statusError}. Nothing here is live.</div>}
+          {!statusError && graph && graph.edges.length === 0 && <div className="overlay-msg">No edges with at least {filters.minWallets} wallets in this range. Lower the minimum or move the clock.</div>}
+          {presentation && (viewState === 'evidence' || selection) && (edge || token) && (
+            <Caption edge={edge} token={token} session={session} liveLastTs={liveLastTs} onOpenEvidence={() => setEvidenceOpen((v) => !v)} onBack={() => select(null)} evidenceOpen={evidenceOpen} />
+          )}
+          {presentation && evidenceOpen && edge && (
+            <aside className="evidence-panel" aria-label="Evidence rows">
+              <h1>
+                {edge.from.symbol} → {edge.to.symbol}
+              </h1>
+              <div className="sub">
+                {edge.from.short} → {edge.to.short} · {edge.wallets_main} wallets · {edge.sequences_total} sequences · ≈ marks interpolated block time
+              </div>
+              {edge.sequences.map((s) => (
+                <SequenceRow key={s.id} s={s} fresh={freshRows.has(String(s.id))} />
+              ))}
+            </aside>
+          )}
           <div className="legend">
             <span>
-              <b>Edge A → B</b>: distinct wallets that sold A, then bought B within {filters.windowS / 60} min. Line width = number of wallets.
-              {filters.showAmbiguous ? ' Dashed lines have only ambiguous sequences.' : ''}
+              <b>Edge A → B</b>: distinct wallets that sold A, then bought B within {filters.windowS / 60} min. Width = wallets; dashed = ambiguous only. Distance on the map is layout, not a fact.
             </span>
             <span>
-              {hover?.kind === 'edge' ? `${graph?.nodes.find((n) => n.address === hover.from)?.symbol ?? ''} → ${graph?.nodes.find((n) => n.address === hover.to)?.symbol ?? ''}` : hover?.kind === 'token' ? graph?.nodes.find((n) => n.address === hover.address)?.symbol : 'Scroll to zoom, drag to pan'}
+              {hover?.kind === 'edge' ? `${graph?.nodes.find((n) => n.address === hover.from)?.symbol ?? ''} → ${graph?.nodes.find((n) => n.address === hover.to)?.symbol ?? ''}` : hover?.kind === 'token' ? graph?.nodes.find((n) => n.address === hover.address)?.symbol : renderer === '3d' ? 'drag to orbit · wheel to zoom · click a coin or a line' : 'scroll to zoom · drag to pan'}
             </span>
           </div>
         </section>
-        <Details selection={selection} edge={edge} token={token} loading={detailLoading} error={detailError} onSelect={select} />
+        {!presentation && <Details selection={selection} edge={edge} token={token} loading={detailLoading} error={detailError} onSelect={select} freshRows={freshRows} />}
       </main>
-      <Ticker status={status} recent={graph?.recent ?? []} freshKeys={freshRows} onSelect={select} />
+      {!presentation && <Ticker status={status} session={session} recent={recent} freshKeys={freshRows} onSelect={select} />}
     </div>
   )
 }

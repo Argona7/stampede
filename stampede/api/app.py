@@ -158,7 +158,8 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
             f = WEB_DIST / full_path
             if full_path and f.is_file():
                 return FileResponse(f)
-            return FileResponse(WEB_DIST / "index.html")
+            # the shell must never be cached: hashed asset names change on every build
+            return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-store"})
     else:
 
         @app.get("/")
