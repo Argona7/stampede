@@ -626,11 +626,18 @@ export default function Scene3D(p: Props) {
       // FOLLOW 2: travel along the route to B, B in front
       const k2: Key = { pos: B.clone().add(side.clone().multiplyScalar(0.4 * near)).add(new THREE.Vector3(0, -0.3 * near, 0.75 * near)), look: B.clone(), dur: 1000 }
       // EVIDENCE: settle where both are visible, apart, with the route between them and room for the caption
-      const far = Math.max(680, 2.6 * d + 320)
-      const shift = p.panelOpen ? 0.42 : 0.14 // look further right so the pair sits left of the caption/panel
+      const far = Math.max(560, 2.2 * d + 260)
+      // framing in camera terms: the caption owns the bottom-left, the evidence panel the right 45%.
+      // Without the panel the pair sits upper-right of centre; with it, upper-left-of-centre.
+      const dir = new THREE.Vector3(0.12, -0.3, 0.9).normalize() // from the look point towards the camera
+      const viewDir = dir.clone().negate()
+      const camRight = new THREE.Vector3().crossVectors(viewDir, s.camera.up).normalize() // screen-right in world space
+      const camUp = new THREE.Vector3().crossVectors(camRight, viewDir).normalize() // screen-up in world space
+      const shiftX = p.panelOpen ? 0.12 : -0.3
+      const look = mid.clone().addScaledVector(camRight, shiftX * far).addScaledVector(camUp, -0.2 * far)
       const k3: Key = {
-        pos: mid.clone().add(side.clone().multiplyScalar(0.12 * far)).add(new THREE.Vector3(shift * far, -0.3 * far, 0.9 * far)),
-        look: mid.clone().add(new THREE.Vector3(shift * far * 0.85, 0.06 * far, 0)),
+        pos: look.clone().addScaledVector(dir, far),
+        look,
         dur: onlyReframe ? 500 : 700,
         onDone: () => propsRef.current.onViewState('evidence'),
       }

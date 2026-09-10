@@ -38,7 +38,7 @@ const page = await ctx.newPage()
 const t0 = Date.now()
 const marks = []
 const mark = (name, note = '') => marks.push({ name, note, offset_s: Math.round((Date.now() - t0) / 100) / 10, clock_ts: null })
-const state = () => page.evaluate(() => window.__stampede_state())
+
 const shot = (name) => page.screenshot({ path: path.join(OUT, `${name}.png`) })
 
 await page.goto(`${BASE}/?layout=presentation${PERF ? '&perf=1' : ''}`)
