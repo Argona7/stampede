@@ -213,8 +213,8 @@ class Rpc:
 
     def get_blocks(self, numbers: list[int], prefer: str = "alchemy") -> dict[int, dict]:
         out: dict[int, dict] = {}
-        for i in range(0, len(numbers), 50):
-            chunk = numbers[i : i + 50]
+        for i in range(0, len(numbers), 100):
+            chunk = numbers[i : i + 100]
             res = self.batch([("eth_getBlockByNumber", [hex(n), False]) for n in chunk], prefer=prefer)
             for n, r in zip(chunk, res):
                 if isinstance(r, dict):
@@ -253,7 +253,7 @@ class Rpc:
             pending = still
             if not pending:
                 break
-            time.sleep(1.5)
+            time.sleep(0.6)
         return out
 
     def get_code_batch(self, addrs: list[str], size: int = 12) -> dict[str, bool]:

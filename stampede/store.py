@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS edges (
   PRIMARY KEY (window_s, from_token, to_token));
 CREATE TABLE IF NOT EXISTS wallets (address TEXT PRIMARY KEY, is_contract INTEGER, trades INTEGER);
 CREATE TABLE IF NOT EXISTS quotes (address TEXT PRIMARY KEY, symbol TEXT, decimals INTEGER);
+CREATE TABLE IF NOT EXISTS rejected_tokens (address TEXT PRIMARY KEY, checked_at REAL);
 CREATE TABLE IF NOT EXISTS reports (name TEXT PRIMARY KEY, created REAL, body TEXT);
 """
 

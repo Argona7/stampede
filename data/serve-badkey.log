@@ -1,0 +1,44 @@
+INFO:     Started server process [28896]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8791 (Press CTRL+C to quit)
+Exception in thread live-tail:
+Traceback (most recent call last):
+  File "/Users/argona/.local/share/uv/python/cpython-3.13.14-macos-aarch64-none/lib/python3.13/threading.py", line 1044, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "/Users/argona/dev/stampede/stampede/api/live.py", line 63, in run
+    head0 = rpc.block_number(prefer="alchemy")
+  File "/Users/argona/dev/stampede/stampede/rpc.py", line 208, in block_number
+    return int(self.call("eth_blockNumber", prefer=prefer), 16)
+               ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/argona/dev/stampede/stampede/rpc.py", line 155, in call
+    raise RpcError(err.get("code"), msg, err.get("data"))
+stampede.rpc.RpcError: rpc error -32600: Must be authenticated!
+INFO:     127.0.0.1:50993 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50994 - "GET /api/graph?window=1800s&from=1789064445&to=1789066245&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50993 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/graph?window=1800s&from=1789064445&to=1789066245&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50993 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51014 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51018 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50995 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=2&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51024 - "GET /api/graph?window=1800s&from=1789064447&to=1789066247&min_wallets=3&limit=260 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50997 - "GET /api/status HTTP/1.1" 200 OK

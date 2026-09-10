@@ -213,14 +213,16 @@ class Ingest:
                 print(f"  blocks {done}/{total}  swap logs {self.stats['logs_swap_kept']}  transfers {self.stats['logs_transfer_kept']}  elapsed {el:.0f}s  eta {eta:.0f}s", file=sys.stderr, flush=True)
 
     # ---- registry ----
-    def resolve_curves(self) -> dict[str, Any]:
+    def resolve_curves(self, fr: int | None = None, to: int | None = None) -> dict[str, Any]:
         known = self.store.curves()
-        seen = [r[0] for r in self.store.db.execute("SELECT DISTINCT address FROM logs WHERE kind IN ('curve_buy','curve_sell')")]
+        rng = " AND block BETWEEN ? AND ?" if fr is not None else ""
+        args = (fr, to) if fr is not None else ()
+        seen = [r[0] for r in self.store.db.execute(f"SELECT DISTINCT address FROM logs WHERE kind IN ('curve_buy','curve_sell'){rng}", args)]
         todo = [c for c in seen if c not in known]
         out = {"curves_seen": len(seen), "curves_resolved_now": 0, "curves_failed": 0}
         if todo:
-            toks = self.rpc.eth_call_batch([(c, chain.S_TOKEN) for c in todo])
-            pairs = self.rpc.eth_call_batch([(c, chain.S_PAIR_TOKEN) for c in todo])
+            both = self.rpc.eth_call_batch([(c, chain.S_TOKEN) for c in todo] + [(c, chain.S_PAIR_TOKEN) for c in todo], size=20)
+            toks, pairs = both[: len(todo)], both[len(todo) :]
             rows, trows, infra = [], [], []
             for c, t, p in zip(todo, toks, pairs):
                 if not t or len(t) < 66:
@@ -238,7 +240,7 @@ class Ingest:
             out["curves_resolved_now"] = len(rows)
         return out
 
-    def resolve_pools(self) -> dict[str, Any]:
+    def resolve_pools(self, fr: int | None = None, to: int | None = None) -> dict[str, Any]:
         """Resolve v4 poolIds seen in Swap logs to PONS v2 tokens.
 
         Proof by reconstruction: the Transfer logs of the pool's swap transactions name candidate ERC-20s; a
@@ -247,32 +249,41 @@ class Ingest:
         Pools that fail this test stay unresolved and are reported as not covered.
         """
         pools = self.store.pools()
-        ids = [r[0] for r in self.store.db.execute("SELECT DISTINCT topic1 FROM logs WHERE kind='v4_swap'")]
+        rng = " AND block BETWEEN ? AND ?" if fr is not None else ""
+        args = (fr, to) if fr is not None else ()
+        ids = [r[0] for r in self.store.db.execute(f"SELECT DISTINCT topic1 FROM logs WHERE kind='v4_swap'{rng}", args)]
         todo = [i for i in ids if i not in pools]
         out = {"pools_seen": len(ids), "pools_resolved_now": 0, "pools_unresolved": 0, "candidate_tokens_checked": 0}
         if not todo:
             return out
         # candidate tokens per pool from transfers touching the PoolManager in the same txs
         cand: dict[str, set[str]] = {i: set() for i in todo}
-        q = """
+        q = f"""
             SELECT s.topic1, t.address FROM logs s JOIN logs t ON t.tx_hash = s.tx_hash AND t.kind='transfer'
-            WHERE s.kind='v4_swap' AND (t.topic1 LIKE ? OR t.topic2 LIKE ?)
+            WHERE s.kind='v4_swap'{rng.replace('block', 's.block')} AND (t.topic1 LIKE ? OR t.topic2 LIKE ?)
         """
         pm_topic = "%" + chain.V4_POOL_MANAGER[2:]
-        for pid, tok in self.store.db.execute(q, (pm_topic, pm_topic)):
+        for pid, tok in self.store.db.execute(q, tuple(args) + (pm_topic, pm_topic)):
             if pid in cand:
                 cand[pid].add(tok)
         tokens = sorted({t for s in cand.values() for t in s})
         out["candidate_tokens_checked"] = len(tokens)
         known_tokens = self.store.tokens()
+        rejected = {r[0] for r in self.store.db.execute("SELECT address FROM rejected_tokens")}
         launched: dict[str, dict] = {}
-        need = [t for t in tokens if t not in known_tokens or not known_tokens[t].get("curve")]
+        need = [t for t in tokens if (t not in known_tokens or not known_tokens[t].get("curve")) and t not in rejected]
         res = self.rpc.eth_call_batch([(chain.PONS_V2_FACTORY, chain.S_GET_LAUNCHED_TOKEN + t[2:].rjust(64, "0")) for t in need])
+        newly_rejected = []
         for t, r in zip(need, res):
             if r and len(r) >= 2 + 64 * 5:
                 curve = chain.addr_from_word(r, 1)
                 if int(curve, 16) != 0:
                     launched[t] = {"curve": curve, "pair_token": chain.addr_from_word(r, 4)}
+                else:
+                    newly_rejected.append((t, time.time()))
+        # negative cache: tokens the factory does not know are never re-checked (PONIE, PONS, stocks, other launchpads)
+        self.store.db.executemany("INSERT OR IGNORE INTO rejected_tokens(address, checked_at) VALUES(?,?)", newly_rejected)
+        out["tokens_rejected_now"] = len(newly_rejected)
         for t, k in known_tokens.items():
             if k.get("curve"):
                 cv = self.store.db.execute("SELECT pair_token FROM curves WHERE curve=?", (k["curve"],)).fetchone()
