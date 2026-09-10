@@ -27,12 +27,17 @@ def main() -> int:
     ap.add_argument("--seconds", type=float, default=6.0)
     ap.add_argument("--api-url", default="http://127.0.0.1:8791")
     ap.add_argument("--out", default="demo/tui")
+    ap.add_argument("--colors", default="truecolor", choices=["truecolor", "256"], help="terminal colour capability to emulate")
     a = ap.parse_args()
     cols, rows = (int(x) for x in a.size.split("x"))
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
-        os.environ["COLORTERM"] = "truecolor"
+        if a.colors == "truecolor":
+            os.environ["COLORTERM"] = "truecolor"
+        else:
+            os.environ.pop("COLORTERM", None)
+            os.environ["TEXTUAL_COLOR_SYSTEM"] = "256"
         os.environ.pop("NO_COLOR", None)
         os.environ["FORCE_COLOR"] = "1"
         os.environ["COLUMNS"], os.environ["LINES"] = str(cols), str(rows)
@@ -65,7 +70,7 @@ def main() -> int:
     text = buf.decode("utf-8", "replace")
     out = ROOT / a.out
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"pty-{cols}x{rows}.log").write_bytes(bytes(buf))
+    (out / f"pty-{cols}x{rows}-{a.colors}.log").write_bytes(bytes(buf))
     checks = {
         "alternate_screen_entered": "\x1b[?1049h" in text,
         "alternate_screen_left": "\x1b[?1049l" in text,
@@ -73,7 +78,7 @@ def main() -> int:
         "brand_drawn": "██████" in text or "S T A M P E D E" in text,
         "status_drawn": "CHAIN Robinhood Chain" in text,
         "rows_drawn": "→" in text and ("clean" in text or "direct" in text or "NO OBSERVED" in text),
-        "truecolor_red_used": "38;2;255;51;68" in text,
+        "red_used": ("38;2;255;51;68" in text) if a.colors == "truecolor" else ("38;5;" in text),
         "exited_after_q": os.WIFEXITED(status) if status else True,
         "bytes": len(buf),
     }

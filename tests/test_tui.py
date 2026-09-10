@@ -5,7 +5,7 @@ import os
 os.environ.pop("NO_COLOR", None)
 os.environ.setdefault("TEXTUAL_COLOR_SYSTEM", "truecolor")
 
-from helpers import TOKEN_A, TOKEN_B  # noqa: E402
+from helpers import TOKEN_A, TOKEN_B, until  # noqa: E402
 from stampede.tui.app import StampedeTUI  # noqa: E402
 from stampede.tui.client import ApiError  # noqa: E402
 
@@ -98,13 +98,12 @@ def test_rows_and_one_wallet_two_sequences():
         fake = FakeClient()
         app = StampedeTUI(fake, poll_s=0.3)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(1.0)
-            await pilot.pause()
             table = app.query_one("#feed")
-            assert table.row_count == 2
+            await until(lambda: table.row_count == 2)
+            await pilot.pause()
             assert "2 of 2 rows" in str(app.query_one("#feedhead").render())
             await pilot.press("enter")
-            await asyncio.sleep(0.6)
+            await until(lambda: app.edge_doc is not None)
             await pilot.pause()
             txt = detail_text(app)
             assert "1 WALLET\n" in txt and "2 sequences" in txt
@@ -121,9 +120,9 @@ def test_new_rows_append_without_clearing_and_selection_stays():
         fake = FakeClient()
         app = StampedeTUI(fake, poll_s=1.0)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(0.9)
-            await pilot.pause()
             table = app.query_one("#feed")
+            await until(lambda: table.row_count == 2)
+            await pilot.pause()
             first_key = table.coordinate_to_cell_key((0, 0))[0].value
             await pilot.press("up")  # select the first (older) row -> follow off
             await pilot.pause()
@@ -152,15 +151,13 @@ def test_seek_rebuilds_history_without_marking_it_fresh():
         fake.history = [ev(1, 1500), ev(2, 1900), ev(5, 5000), ev(6, 5100)]
         app = StampedeTUI(fake, poll_s=0.3)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(0.9)
-            await pilot.pause()
-            assert app.query_one("#feed").row_count == 2
+            table = app.query_one("#feed")
+            await until(lambda: table.row_count == 2)
             fake.clock = 5200  # a seek far ahead of anything playback could explain
             fake.rev += 1
-            await asyncio.sleep(0.8)
+            await until(lambda: set(app.events) == {5, 6})
             await pilot.pause()
-            table = app.query_one("#feed")
-            assert table.row_count == 2 and set(app.events) == {5, 6}
+            assert table.row_count == 2
             assert app.fresh_ids == set() and app.last_events_kind == "history"
 
     run(body())
@@ -171,7 +168,7 @@ def test_search_filters_and_escape_restores():
         fake = FakeClient()
         app = StampedeTUI(fake, poll_s=0.3)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(0.9)
+            await until(lambda: app.query_one("#feed").row_count == 2)
             await pilot.pause()
             await pilot.press("slash")
             for ch in "zzz":
@@ -207,18 +204,15 @@ def test_api_error_shows_inverted_alert_and_freezes():
         fake = FakeClient()
         app = StampedeTUI(fake, poll_s=0.3)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(0.9)
-            await pilot.pause()
+            await until(lambda: app.query_one("#feed").row_count == 2)
             fake.fail = True
-            await asyncio.sleep(0.8)
-            await pilot.pause()
             alert = app.query_one("#alert")
-            assert alert.has_class("visible") and "DISCONNECTED" in str(alert.render())
+            await until(lambda: alert.has_class("visible"))
+            await pilot.pause()
+            assert "DISCONNECTED" in str(alert.render())
             assert app.query_one("#feed").row_count == 2  # data frozen, not replaced
             fake.fail = False
-            await asyncio.sleep(0.8)
-            await pilot.pause()
-            assert not alert.has_class("visible")
+            await until(lambda: not alert.has_class("visible"))
 
     run(body())
 
@@ -228,11 +222,9 @@ def test_space_toggles_shared_session():
         fake = FakeClient()
         app = StampedeTUI(fake, poll_s=0.3)
         async with app.run_test(size=(180, 50)) as pilot:
-            await asyncio.sleep(0.9)
+            await until(lambda: app.session is not None)
             await pilot.pause()
             await pilot.press("space")
-            await asyncio.sleep(0.5)
-            await pilot.pause()
-            assert fake.playing is True and app.session["playing"] is True
+            await until(lambda: fake.playing is True and app.session["playing"] is True)
 
     run(body())

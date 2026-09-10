@@ -94,8 +94,9 @@ export default function App() {
       .catch((e) => setStatusError(String(e.message ?? e)))
   }, [])
 
-  // the visible range ends at the shared clock (replay/fixture) or the last indexed block (live)
-  const liveLastTs = status?.data.last_ts ?? null
+  // the visible range ends at the shared clock: replay/fixture clock, or in live mode the last block the tail
+  // indexed (null until the first live block, so an old sample is never shown as if it were live)
+  const liveLastTs = mode === 'live' ? session?.clock_ts ?? null : status?.data.last_ts ?? null
   const toTs = mode === 'live' ? liveLastTs : session?.clock_ts ?? null
   const fromTs = toTs !== null ? toTs - filters.spanS : null
 
@@ -285,6 +286,7 @@ export default function App() {
           )}
           {statusError && <div className="overlay-msg">API not reachable: {statusError}. Nothing here is live.</div>}
           {!statusError && graph && graph.edges.length === 0 && <div className="overlay-msg">No edges with at least {filters.minWallets} wallets in this range. Lower the minimum or move the clock.</div>}
+          {!statusError && mode === 'live' && toTs === null && <div className="overlay-msg">Waiting for the first live block. Nothing is drawn until the tail has indexed real data.</div>}
           {presentation && (viewState === 'evidence' || selection) && (edge || token) && (
             <Caption edge={edge} token={token} session={session} liveLastTs={liveLastTs} onOpenEvidence={() => setEvidenceOpen((v) => !v)} onBack={() => select(null)} evidenceOpen={evidenceOpen} />
           )}

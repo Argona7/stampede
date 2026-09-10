@@ -494,7 +494,6 @@ export default function Scene3D(p: Props) {
     fat(mid, 2, EDGE_MID)
     fat(thick, 3.5, EDGE_THICK)
     s.drawnEdges = links.length
-    ;(window as unknown as { __stampede?: unknown }).__stampede = { radius: layout.radius, nodes: arr.length, camera: s.camera.position, sample: arr.slice(0, 3).map((n) => [n.id.slice(0, 8), n.x, n.y, n.z, n.r]) }
     // fog around the layout size
     ;(s.scene.fog as THREE.Fog).near = layout.radius * 2.6 + 300
     ;(s.scene.fog as THREE.Fog).far = layout.radius * 5.5 + 600
@@ -589,8 +588,6 @@ export default function Scene3D(p: Props) {
     if (selectionChanged) userMoved.current = false
     const instant = p.reducedMotion
     const fly = (keys: Key[]) => {
-      const dbg = (window as unknown as { __flights?: unknown[] })
-      ;(dbg.__flights ??= []).push({ R, n: s.layout?.nodes.size, sel: p.selection, target: keys[keys.length - 1].pos.toArray(), t: Math.round(performance.now()) })
       if (instant) {
         const last = keys[keys.length - 1]
         s.camera.position.copy(last.pos)

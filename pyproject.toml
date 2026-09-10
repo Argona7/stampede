@@ -17,6 +17,7 @@ stampede = "stampede.cli:main"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=8.3",
 ]
 

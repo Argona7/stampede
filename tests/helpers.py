@@ -48,3 +48,18 @@ def make_ctx():
         universe={TOKEN_A, TOKEN_B, TOKEN_C},
         infra=set(chain.KNOWN_INFRA) | {CURVE_A, CURVE_C, chain.NATIVE},
     )
+
+
+async def until(pred, timeout: float = 6.0, step: float = 0.05):
+    """Poll `pred()` until truthy (returns it) or fail after `timeout` seconds. Replaces fixed sleeps in async UI tests."""
+    import asyncio
+    import time
+
+    t0 = time.time()
+    while True:
+        v = pred()
+        if v:
+            return v
+        if time.time() - t0 > timeout:
+            raise AssertionError(f"condition not met within {timeout}s: {pred}")
+        await asyncio.sleep(step)

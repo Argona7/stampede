@@ -1,0 +1,86 @@
+{
+ "recorded_at_utc": "2026-09-10T20:37:49.172Z",
+ "base": "http://127.0.0.1:8791",
+ "session_id": "S-a0cfdf",
+ "replay_speed": 10,
+ "replay_clock_start_ts": 1789061067,
+ "replay_clock_end_ts": 1789061198,
+ "dpr": 2,
+ "edge": {
+  "from": "0x6c36aa7f9128d67cc0e114a59841d572849c1a01",
+  "to": "0x4ad59292fe286460f5e533dfabe4a868e1e87b08",
+  "wallets_main": 54,
+  "wallets_direct": 0,
+  "wallets_clean": 54,
+  "wallets_ambiguous": 0,
+  "sequences": 883,
+  "first_ts": 1789060603,
+  "last_ts": 1789061079
+ },
+ "marks": [
+  {
+   "name": "overview",
+   "note": "presentation layout, whole network from the 3/4 angle",
+   "offset_s": 3.6,
+   "clock_ts": null
+  },
+  {
+   "name": "play",
+   "note": "replay running at 10x; new sequences pulse along their edges",
+   "offset_s": 3.8,
+   "clock_ts": null
+  },
+  {
+   "name": "pulses",
+   "note": "first pulses visible",
+   "offset_s": 4.5,
+   "clock_ts": null
+  },
+  {
+   "name": "select",
+   "note": "edge selected: 0x6c36aa7f9128d67cc0e114a59841d572849c1a01 -> 0x4ad59292fe286460f5e533dfabe4a868e1e87b08 (54 wallets at selection time)",
+   "offset_s": 8.2,
+   "clock_ts": null
+  },
+  {
+   "name": "follow",
+   "note": "camera at A, travelling along the route to B",
+   "offset_s": 9.1,
+   "clock_ts": null
+  },
+  {
+   "name": "evidence",
+   "note": "camera settled: A · SOLD, B · BOUGHT, wallet count caption",
+   "offset_s": 11.5,
+   "clock_ts": null
+  },
+  {
+   "name": "rows",
+   "note": "evidence rows: wallet, sold/bought, exact UTC block time, tx links",
+   "offset_s": 15,
+   "clock_ts": null
+  },
+  {
+   "name": "pause",
+   "note": "replay paused from the shared session; clock frozen on both surfaces",
+   "offset_s": 17,
+   "clock_ts": null
+  },
+  {
+   "name": "back",
+   "note": "Esc: back to the overview",
+   "offset_s": 17.7,
+   "clock_ts": null
+  },
+  {
+   "name": "end",
+   "note": "",
+   "offset_s": 19.3,
+   "clock_ts": null
+  }
+ ],
+ "perf": {
+  "readout": "60 fps · p50 16.7 ms · p95 16.8 ms · 260 edges · 178 nodes",
+  "gpu": "ANGLE (Apple, ANGLE Metal Renderer: Apple M5 Pro, Unspecified Version)"
+ }
+}

@@ -1,0 +1,17 @@
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-01.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-02.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-03.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-04.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-05.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-06.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-07.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-08.png'
+duration 0.5
+file '/Users/argona/dev/stampede/demo/v2/tui/tui-08.png'

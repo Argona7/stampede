@@ -214,9 +214,10 @@ class StampedeTUI(App):
                 pages.append(ev)
             out["events"] = pages
             out["seek"] = seek
-            if with_graph or self.graph_doc is None:
-                fr = (clock - span) if clock is not None else None
-                out["graph"] = self.client.graph(w, fr, clock, 1, 10)
+            if (with_graph or self.graph_doc is None) and clock is not None:
+                out["graph"] = self.client.graph(w, clock - span, clock, 1, 10)
+            elif clock is None:
+                out["graph"] = {"edges": [], "nodes": [], "waiting": True}
             self.call_from_thread(self.apply_update, out)
         except ApiError as e:
             self.call_from_thread(self.apply_error, str(e))
@@ -439,7 +440,7 @@ class StampedeTUI(App):
             now = time.time()
             edges = g.get("edges", [])[:7]
             if not edges:
-                t.append("\nno edges in range", style=MUTED)
+                t.append("\nwaiting for the first live block" if g.get("waiting") else "\nno edges in range", style=MUTED)
             labels = {n["address"]: n for n in g.get("nodes", [])}
             cur: dict[str, int] = {}
             for e in edges:
