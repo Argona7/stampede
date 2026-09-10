@@ -53,22 +53,32 @@ def build_context(store: Store) -> Context:
 
 
 class Interp:
-    """Block -> (timestamp, exact) from anchor blocks; linear in between, clamped at the ends."""
+    """Block -> (timestamp, exact) from anchor blocks; linear in between.
+
+    Outside the anchor range the estimate extrapolates at ~10 blocks/s from the nearest anchor, but only
+    up to MAX_EXTRAPOLATE_BLOCKS; beyond that (or with no anchors at all) the time is UNKNOWN and the
+    caller must not store a fake value. This is what produced `ts = 0` rows before.
+    """
+
+    MAX_EXTRAPOLATE_BLOCKS = 600
+    BLOCK_SECONDS = 0.1
 
     def __init__(self, anchors: dict[int, int]):
         self.nums = sorted(anchors)
         self.ts = [anchors[n] for n in self.nums]
 
-    def __call__(self, block: int) -> tuple[int, int]:
+    def __call__(self, block: int) -> tuple[int | None, int]:
         if not self.nums:
-            return 0, 0
+            return None, 0
         i = bisect.bisect_left(self.nums, block)
         if i < len(self.nums) and self.nums[i] == block:
             return self.ts[i], 1
         if i == 0:
-            return self.ts[0], 0
+            d = self.nums[0] - block
+            return (round(self.ts[0] - d * self.BLOCK_SECONDS), 0) if d <= self.MAX_EXTRAPOLATE_BLOCKS else (None, 0)
         if i >= len(self.nums):
-            return self.ts[-1], 0
+            d = block - self.nums[-1]
+            return (round(self.ts[-1] + d * self.BLOCK_SECONDS), 0) if d <= self.MAX_EXTRAPOLATE_BLOCKS else (None, 0)
         a, b = self.nums[i - 1], self.nums[i]
         ta, tb = self.ts[i - 1], self.ts[i]
         return round(ta + (tb - ta) * (block - a) / (b - a)), 0
@@ -233,6 +243,8 @@ def normalize(store: Store, reset: bool = False, rpc=None) -> dict[str, Any]:
             continue
         stats["txs_with_trades"] += 1
         ts, exact = interp(block)
+        if ts is None:
+            stats["trades_unknown_time"] += len(trades)
         by_wallet: dict[str, set[str]] = defaultdict(set)
         for t in trades:
             stats[f"trades_{t.side}"] += 1
@@ -285,6 +297,43 @@ def normalize(store: Store, reset: bool = False, rpc=None) -> dict[str, Any]:
         "trades_by_contract_wallets": q("SELECT COALESCE(SUM(t.n),0) FROM (SELECT wallet, COUNT(*) n FROM trades GROUP BY wallet) t JOIN wallets w ON w.address=t.wallet WHERE w.is_contract=1").fetchone()[0],
     }
     return result
+
+
+def repair_unknown_ts(store: Store, rpc, limit: int = 20000) -> dict[str, Any]:
+    """Trades with ts NULL/0: fetch exact headers for their blocks (every 5th block as anchors + interpolate)."""
+    blocks = [r[0] for r in store.db.execute("SELECT DISTINCT block FROM trades WHERE ts IS NULL OR ts=0 ORDER BY block LIMIT ?", (limit,))]
+    if not blocks:
+        return {"trades_fixed": 0, "blocks": 0}
+    lo, hi = blocks[0], blocks[-1]
+    wanted = sorted(set(range(lo, hi + 1, 5)) | {lo, hi} | set(blocks[: min(len(blocks), 200)]))
+    have = {n for n, (ts, ex) in store.blocks().items() if ex == 1}
+    todo = [n for n in wanted if n not in have]
+    got = rpc.get_blocks(todo) if todo else {}
+    store.upsert_blocks((n, int(b["timestamp"], 16), 1) for n, b in got.items())
+    store.commit()
+    interp = Interp({n: ts for n, (ts, ex) in store.blocks().items() if ex == 1})
+    fixed = 0
+    for b in blocks:
+        ts, exact = interp(b)
+        if ts is None:
+            continue
+        cur = store.db.execute("UPDATE trades SET ts=?, ts_exact=? WHERE block=? AND (ts IS NULL OR ts=0)", (ts, exact, b))
+        fixed += cur.rowcount
+    store.commit()
+    return {"trades_fixed": fixed, "blocks": len(blocks), "headers_fetched": len(got), "still_unknown": store.db.execute("SELECT COUNT(*) FROM trades WHERE ts IS NULL OR ts=0").fetchone()[0]}
+
+
+def main_repair_ts(args) -> int:
+    from .rpc import Rpc
+
+    store = Store()
+    rpc = Rpc()
+    if not rpc.alchemy_url:
+        print("repair-ts needs ALCHEMY_KEY", file=sys.stderr)
+        return 2
+    res = repair_unknown_ts(store, rpc, args.limit)
+    print(json.dumps(res, indent=1))
+    return 0
 
 
 def main_normalize(args) -> int:

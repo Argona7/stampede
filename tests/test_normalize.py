@@ -118,4 +118,5 @@ def test_interpolation_marks_exact_and_estimated():
     assert it(100) == (1000, 1)
     assert it(150) == (1005, 0)
     assert it(200) == (1010, 1)
-    assert it(300) == (1010, 0)  # clamped, marked as not exact
+    assert it(300) == (1020, 0)  # extrapolated at 0.1 s per block, marked as not exact
+    assert it(5000) == (None, 0)  # too far from any anchor: unknown, never a fake value

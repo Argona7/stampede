@@ -9,6 +9,7 @@ dependencies = [
     "eth-hash[pycryptodome]>=0.7",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]

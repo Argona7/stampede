@@ -36,6 +36,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--port", type=int, default=8791)
     p.add_argument("--mode", default="fixture", choices=["fixture", "replay", "live"])
     p.add_argument("--window", default="30m")
+    p.add_argument("--speed", type=float, default=10.0, help="initial replay speed of the shared session clock")
+
+    p = sub.add_parser("terminal", help="full-screen terminal UI (TUI) on top of a running API")
+    p.add_argument("--api-url", default="http://127.0.0.1:8791")
+    p.add_argument("--poll", type=float, default=2.0, help="seconds between polls")
+
+    p = sub.add_parser("repair-ts", help="fetch block headers for trades whose timestamp is unknown (0/NULL) and fix them")
+    p.add_argument("--limit", type=int, default=20000)
 
     p = sub.add_parser("export-fixture", help="export the current sample as a static JSON fixture for the UI")
     p.add_argument("--out", default="web/public/fixture.json")
@@ -76,6 +84,14 @@ def main(argv: list[str] | None = None) -> int:
         from .api.fixture import main_export
 
         return main_export(args)
+    if args.cmd == "terminal":
+        from .tui.app import main_terminal
+
+        return main_terminal(args)
+    if args.cmd == "repair-ts":
+        from .normalize import main_repair_ts
+
+        return main_repair_ts(args)
     return 1
 
 

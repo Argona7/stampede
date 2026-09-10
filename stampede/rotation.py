@@ -128,7 +128,7 @@ def rotate(store: Store, window_s: int) -> dict[str, Any]:
     store.db.execute("DELETE FROM sequences WHERE window_s=?", (window_s,))
     store.db.execute("DELETE FROM edges WHERE window_s=?", (window_s,))
     by_wallet: dict[str, list[T]] = defaultdict(list)
-    for tid, tx, block, ts, token, wallet, side in store.db.execute("SELECT id, tx_hash, block, ts, token, wallet, side FROM trades"):
+    for tid, tx, block, ts, token, wallet, side in store.db.execute("SELECT id, tx_hash, block, ts, token, wallet, side FROM trades WHERE ts IS NOT NULL AND ts>0"):
         by_wallet[wallet].append(T(tid, tx, block, ts, token, side))
     rows: list[tuple] = []
     n_wallets_with_both = 0

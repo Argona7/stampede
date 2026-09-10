@@ -15,12 +15,13 @@ from ..rotation import parse_window
 from ..store import Store
 from . import queries
 from .live import LiveTail
+from .session import SessionClock, SessionError
 
 WEB_DIST = ROOT / "web" / "dist"
 
 
-def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = None) -> FastAPI:
-    app = FastAPI(title="STAMPEDE API", version="0.1.0")
+def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = None, speed: float = 10.0) -> FastAPI:
+    app = FastAPI(title="STAMPEDE API", version="0.2.0")
     path = db or db_path()
     state: dict[str, Any] = {"mode": mode, "window_s": parse_window(window), "started": time.time(), "live": None}
 
@@ -31,6 +32,26 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         tail = LiveTail(path, window_s=state["window_s"])
         tail.start()
         state["live"] = tail
+
+    s0 = store()
+    try:
+        smp0 = queries.sample(s0)
+    finally:
+        s0.close()
+    session = SessionClock(mode, smp0.get("from_ts"), smp0.get("to_ts"), window_s=state["window_s"], span_s=1800, speed=speed)
+    state["session"] = session
+
+    def live_last_ts() -> int | None:
+        lv = state["live"].status if state["live"] else None
+        return lv.get("last_ts") if lv else None
+
+    def session_state() -> dict[str, Any]:
+        st = session.state(live_last_ts())
+        if mode == "live":
+            lv = state["live"].status if state["live"] else {}
+            st["label"] = "LIVE · PAUSED (provider error)" if lv.get("paused") else "LIVE"
+            st["live_paused"] = bool(lv.get("paused"))
+        return st
 
     @app.get("/api/status")
     def status() -> dict[str, Any]:
@@ -45,18 +66,48 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
                 age = (now - live["last_ts"]) if live and live.get("last_ts") else None
             else:
                 age = (now - bounds["last_ts"]) if bounds["last_ts"] else None
+            stale = mode == "live" and age is not None and age > 60
             return {
                 "mode": mode,  # fixture | replay | live
                 "mode_label": {"fixture": "FIXTURE · recorded sample, not live", "replay": "REPLAY · recorded sample played back", "live": "LIVE · tailing the chain head"}[mode],
                 "chain": {"id": chain.CHAIN_ID, "name": "Robinhood Chain", "explorer": chain.EXPLORER},
-                "sample": smp,
-                "data": {**bounds, "age_s": age, "server_time": now},
+                # three different scopes, never to be mixed up in a label:
+                "sample": {**smp, **queries.sample_stats(s, smp), "scope": "fixed recorded sample (docs/COVERAGE.md)"},
+                "store": {**bounds, "scope": "everything in the database, sample plus live tail"},
+                "data": {**bounds, "age_s": age, "server_time": now},  # kept for older clients
                 "source": cov.get("ingest_path"),
                 "coverage": cov,
                 "live": live,
+                "session": session_state(),
                 "default_window_s": state["window_s"],
-                "connection": ("error" if (live and live.get("paused")) else "ok") if mode == "live" else "static",
+                "connection": ("error" if (live and live.get("paused")) else ("stale" if stale else "ok")) if mode == "live" else "static",
             }
+        finally:
+            s.close()
+
+    @app.get("/api/session")
+    def get_session() -> dict[str, Any]:
+        return session_state()
+
+    @app.post("/api/session")
+    def post_session(body: dict[str, Any]) -> dict[str, Any]:
+        try:
+            session.control(str(body.get("action", "")), ts=body.get("ts"), speed=body.get("speed"), span_s=body.get("span_s"), window_s=body.get("window_s"))
+        except SessionError as e:
+            raise HTTPException(e.status, e.message)
+        return session_state()
+
+    @app.get("/api/events")
+    def get_events(window: str | None = None, until: int | None = None, after: str | None = None, limit: int = 500, backfill_s: int = 300, ambiguous: int = 0) -> dict[str, Any]:
+        s = store()
+        try:
+            st = session_state()
+            w = parse_window(window) if window else st["window_s"]
+            u = until if until is not None else (st["clock_ts"] if st["clock_ts"] is not None else int(time.time()))
+            grades = ("direct", "clean", "ambiguous") if ambiguous else ("direct", "clean")
+            out = queries.events(s, w, int(u), after, min(limit, 2000), backfill_s, grades)
+            out["session"] = st
+            return out
         finally:
             s.close()
 
@@ -152,6 +203,6 @@ def _exactify_and_enrich(s: Store, edge_out: dict[str, Any]) -> None:
 def main_serve(args) -> int:
     import uvicorn
 
-    app = create_app(mode=args.mode, window=args.window)
+    app = create_app(mode=args.mode, window=args.window, speed=getattr(args, "speed", 10.0))
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

@@ -50,6 +50,7 @@ class LiveTail(threading.Thread):
             "gaps": [],  # [from_block, to_block, reason] ranges deliberately skipped (server was down, head ran away)
         }
         self._stop = threading.Event()
+        self._rpc = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -57,6 +58,7 @@ class LiveTail(threading.Thread):
     def run(self) -> None:
         store = Store(self.db_path)
         rpc = Rpc()
+        self._rpc = rpc
         ing = Ingest(store, rpc, HyperSync(), workers=6)
         ing.seed_infra()
         self.status["running"] = True
@@ -132,12 +134,21 @@ class LiveTail(threading.Thread):
             g = groups.setdefault(tx_hash, (block, []))
             g[1].append({"log_index": li, "address": addr, "topic0": t0, "topic1": t1, "topic2": t2, "topic3": t3, "data": data, "kind": kind})
         rows = []
+        unknown = 0
         wallets: set[str] = set()
         for tx_hash, (block, logs) in groups.items():
             trades, _notes = trades_from_tx(tx_hash, block, logs, ctx)
             if not trades:
                 continue
             ts, exact = interp(block)
+            if ts is None:
+                # no usable header nearby: fetch this one block rather than writing an unknown time
+                hdr = self._rpc.get_block(block) if self._rpc else None
+                if hdr:
+                    ts, exact = int(hdr["timestamp"], 16), 1
+                    store.upsert_blocks([(block, ts, 1)])
+                else:
+                    unknown += len(trades)
             for t in trades:
                 wallets.add(t.wallet)
                 rows.append((t.tx_hash, t.block, ts, exact, t.token, t.wallet, t.side, str(t.token_amount), t.quote_token, str(t.quote_amount), t.venue, json.dumps(t.swap_logs), "transfer_net", json.dumps(t.flags)))
@@ -158,7 +169,7 @@ class LiveTail(threading.Thread):
                 min_ts[wallet] = min(min_ts.get(wallet, ts), ts)
         for w, ids in new_buy_ids.items():
             lo = min_ts[w] - self.window_s - 5
-            trades = [T(r[0], r[1], r[2], r[3], r[4], r[5]) for r in store.db.execute("SELECT id, tx_hash, block, ts, token, side FROM trades WHERE wallet=? AND ts>=?", (w, lo))]
+            trades = [T(r[0], r[1], r[2], r[3], r[4], r[5]) for r in store.db.execute("SELECT id, tx_hash, block, ts, token, side FROM trades WHERE wallet=? AND ts IS NOT NULL AND ts>0 AND ts>=?", (w, lo))]
             seqs = [s for s in sequences_for_wallet(trades, self.window_s) if s["buy_trade"] in ids]
             store.db.executemany(
                 "INSERT OR IGNORE INTO sequences(window_s,wallet,sell_token,buy_token,sell_trade,buy_trade,sell_ts,buy_ts,gap_s,grade,candidates) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -166,4 +177,6 @@ class LiveTail(threading.Thread):
             )
             n_seq += len(seqs)
         store.commit()
+        if unknown:
+            self.status["unknown_time_trades"] = self.status.get("unknown_time_trades", 0) + unknown
         return len(rows), n_seq

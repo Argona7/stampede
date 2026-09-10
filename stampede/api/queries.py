@@ -28,8 +28,94 @@ def sample(store: Store) -> dict[str, Any]:
 
 
 def data_bounds(store: Store) -> dict[str, Any]:
-    r = store.db.execute("SELECT MIN(ts), MAX(ts), MAX(block), COUNT(*) FROM trades").fetchone()
-    return {"first_ts": r[0], "last_ts": r[1], "last_block": r[2], "trades": r[3]}
+    """Whole store (recorded sample + anything the live tail added). Rows without a known time are counted, not used as bounds."""
+    r = store.db.execute("SELECT MIN(ts), MAX(ts), MAX(block), COUNT(*) FROM trades WHERE ts IS NOT NULL AND ts > 0").fetchone()
+    unknown = store.db.execute("SELECT COUNT(*) FROM trades WHERE ts IS NULL OR ts = 0").fetchone()[0]
+    return {"first_ts": r[0], "last_ts": r[1], "last_block": r[2], "trades": r[3] + unknown, "trades_with_time": r[3], "unknown_time_trades": unknown}
+
+
+def sample_stats(store: Store, smp: dict[str, Any]) -> dict[str, Any]:
+    """Counts inside the fixed sample bounds only (the numbers quoted in docs/COVERAGE.md)."""
+    fr, to = smp.get("from_block"), smp.get("to_block")
+    if fr is None or to is None:
+        return {}
+    r = store.db.execute("SELECT COUNT(*), COUNT(DISTINCT wallet), COUNT(DISTINCT token) FROM trades WHERE block BETWEEN ? AND ?", (fr, to)).fetchone()
+    return {"trades": r[0], "wallets": r[1], "tokens": r[2]}
+
+
+def encode_cursor(buy_ts: int, seq_id: int) -> str:
+    return f"{buy_ts}:{seq_id}"
+
+
+def decode_cursor(c: str | None) -> tuple[int, int] | None:
+    if not c:
+        return None
+    try:
+        a, b = c.split(":")
+        return int(a), int(b)
+    except ValueError:
+        return None
+
+
+def events(store: Store, window_s: int, until: int, after: str | None, limit: int = 500, backfill_s: int = 300, grades: tuple[str, ...] = ("direct", "clean")) -> dict[str, Any]:
+    """Observed sequences as an ordered event stream.
+
+    - with `after` (cursor "buy_ts:id"): the sequences observed after that point and up to `until`,
+      oldest first. These are *new* events for a client that already holds the cursor.
+    - without `after`: history for (until - backfill_s, until], oldest first, plus the cursor to
+      continue from. A client uses this after a seek, and must not animate these rows as fresh.
+    Ordering is total (buy_ts, id), ids are the stable `sequences.id`, so nothing is lost between polls
+    as long as the client keeps paging while has_more is true.
+    """
+    q = store.db.execute
+    gl = ",".join("?" * len(grades))
+    cur = decode_cursor(after)
+    if cur:
+        rows = q(
+            f"""SELECT s.id, s.buy_ts, s.wallet, s.sell_token, s.buy_token, s.grade, s.gap_s, tb.tx_hash, ts.tx_hash, tb.ts_exact, ts.ts
+                FROM sequences s JOIN trades tb ON tb.id=s.buy_trade JOIN trades ts ON ts.id=s.sell_trade
+                WHERE s.window_s=? AND s.grade IN ({gl}) AND s.buy_ts<=? AND (s.buy_ts>? OR (s.buy_ts=? AND s.id>?))
+                ORDER BY s.buy_ts, s.id LIMIT ?""",
+            (window_s, *grades, until, cur[0], cur[0], cur[1], limit + 1),
+        ).fetchall()
+        kind = "new"
+    else:
+        rows = q(
+            f"""SELECT s.id, s.buy_ts, s.wallet, s.sell_token, s.buy_token, s.grade, s.gap_s, tb.tx_hash, ts.tx_hash, tb.ts_exact, ts.ts
+                FROM sequences s JOIN trades tb ON tb.id=s.buy_trade JOIN trades ts ON ts.id=s.sell_trade
+                WHERE s.window_s=? AND s.grade IN ({gl}) AND s.buy_ts>? AND s.buy_ts<=?
+                ORDER BY s.buy_ts, s.id LIMIT ?""",
+            (window_s, *grades, until - backfill_s, until, limit + 1),
+        ).fetchall()
+        kind = "history"
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    labels = token_labels(store, {r[3] for r in rows} | {r[4] for r in rows})
+    out = []
+    for r in rows:
+        out.append({
+            "id": r[0],
+            "cursor": encode_cursor(r[1], r[0]),
+            "buy_ts": r[1],
+            "buy_ts_exact": bool(r[9]),
+            "sell_ts": r[10],
+            "wallet": r[2],
+            "from": r[3],
+            "to": r[4],
+            "from_symbol": labels[r[3]]["symbol"],
+            "to_symbol": labels[r[4]]["symbol"],
+            "from_short": labels[r[3]]["short"],
+            "to_short": labels[r[4]]["short"],
+            "grade": r[5],
+            "gap_s": r[6],
+            "buy_tx": r[7],
+            "sell_tx": r[8],
+        })
+    if rows:
+        next_cursor = encode_cursor(rows[-1][1], rows[-1][0])
+    else:
+        next_cursor = after if cur else encode_cursor(until, 0)
+    return {"kind": kind, "window_s": window_s, "until": until, "count": len(out), "events": out, "next_cursor": next_cursor, "has_more": has_more}
 
 
 def coverage_summary(store: Store) -> dict[str, Any]:
@@ -122,14 +208,31 @@ def graph(store: Store, window_s: int, from_ts: int | None, to_ts: int | None, m
             chunk + targs,
         ):
             stats[r[0]] = {"buys": r[1], "sells": r[2], "buyers": r[3], "sellers": r[4], "last_trade_ts": r[5]}
+    # unique wallets per node across ALL its edges in range (an address on two edges counts once here)
+    uniq_in: dict[str, int] = {}
+    uniq_out: dict[str, int] = {}
+    for i in range(0, len(lst), 400):
+        chunk = lst[i : i + 400]
+        ph = ",".join("?" * len(chunk))
+        for r in q(f"SELECT buy_token, COUNT(DISTINCT wallet) FROM sequences WHERE {where} AND grade IN ('direct','clean') AND buy_token IN ({ph}) GROUP BY buy_token", args + chunk):
+            uniq_in[r[0]] = r[1]
+        for r in q(f"SELECT sell_token, COUNT(DISTINCT wallet) FROM sequences WHERE {where} AND grade IN ('direct','clean') AND sell_token IN ({ph}) GROUP BY sell_token", args + chunk):
+            uniq_out[r[0]] = r[1]
     nodes = []
     for a in addrs:
         l = labels[a]
         st = stats.get(a, {"buys": 0, "sells": 0, "buyers": 0, "sellers": 0, "last_trade_ts": None})
         inflow = sum(e["wallets_main"] for e in edges if e["to"] == a)
         outflow = sum(e["wallets_main"] for e in edges if e["from"] == a)
-        nodes.append({**l, **st, "in_wallets": inflow, "out_wallets": outflow})
-    nodes.sort(key=lambda n: -(n["in_wallets"] + n["out_wallets"]))
+        nodes.append({
+            **l,
+            **st,
+            "in_edge_wallet_sum": inflow,  # sum over drawn edges; one address can appear on several edges
+            "out_edge_wallet_sum": outflow,
+            "in_unique_wallets": uniq_in.get(a, 0),  # distinct addresses that rotated INTO this coin (all edges in range)
+            "out_unique_wallets": uniq_out.get(a, 0),
+        })
+    nodes.sort(key=lambda n: -(n["in_edge_wallet_sum"] + n["out_edge_wallet_sum"]))
     recent = [
         {"wallet": r[0], "from": r[1], "to": r[2], "grade": r[3], "buy_ts": r[4], "gap_s": r[5], "buy_tx": r[6]}
         for r in q(
@@ -141,7 +244,8 @@ def graph(store: Store, window_s: int, from_ts: int | None, to_ts: int | None, m
     for r in recent:
         r["from_label"] = labels.get(r["from"], token_labels(store, {r["from"]})[r["from"]])["symbol"]
         r["to_label"] = labels.get(r["to"], token_labels(store, {r["to"]})[r["to"]])["symbol"]
-    total = q(f"SELECT COUNT(*), COUNT(DISTINCT wallet) FROM sequences WHERE {where}", args).fetchone()
+    total = q(f"SELECT COUNT(*), COUNT(DISTINCT wallet), COUNT(DISTINCT CASE WHEN grade IN ('direct','clean') THEN wallet END) FROM sequences WHERE {where}", args).fetchone()
+    edges_total = q(f"SELECT COUNT(*) FROM (SELECT 1 FROM sequences WHERE {where} GROUP BY sell_token, buy_token HAVING COUNT(DISTINCT CASE WHEN grade IN ('direct','clean') THEN wallet END) >= ?)", args + [min_wallets]).fetchone()[0]
     return {
         "window_s": window_s,
         "from_ts": from_ts,
@@ -149,7 +253,14 @@ def graph(store: Store, window_s: int, from_ts: int | None, to_ts: int | None, m
         "nodes": nodes,
         "edges": edges,
         "recent": recent,
-        "totals": {"sequences_in_range": total[0], "wallets_in_range": total[1], "edges_returned": len(edges), "truncated": len(edges) >= limit},
+        "totals": {
+            "sequences_in_range": total[0],
+            "wallets_in_range": total[1],
+            "wallets_main_in_range": total[2],
+            "edges_returned": len(edges),
+            "edges_matching": edges_total,
+            "truncated": edges_total > len(edges),
+        },
     }
 
 
