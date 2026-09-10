@@ -1,0 +1,30 @@
+[project]
+name = "stampede"
+version = "0.1.0"
+description = "Read-only map of observed wallet rotations between memecoins on Robinhood Chain (PONS v2 sample)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests>=2.32",
+    "eth-hash[pycryptodome]>=0.7",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+stampede = "stampede.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["stampede"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

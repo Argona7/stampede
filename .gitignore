@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.sqlite
+data/*.sqlite-journal
+data/*.sqlite-wal
+data/*.sqlite-shm
+data/cache/
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+demo/raw/
+.DS_Store

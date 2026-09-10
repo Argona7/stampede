@@ -1,0 +1,2 @@
+ingest blocks 59546948..59582600 (35653 blocks) via alchemy_10_block_parallel
+  blocks 3000/35653  swap logs 22932  transfers 100620  elapsed 32s  eta 348s

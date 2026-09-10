@@ -1,0 +1,174 @@
+{
+ "measured_at_utc": "2026-09-10 18:18:51 UTC",
+ "public_rpc": {
+  "url": "https://rpc.mainnet.chain.robinhood.com",
+  "chain_id": 4663,
+  "blockNumber_latency_ms": {
+   "min": 204,
+   "median": 205,
+   "max": 261
+  },
+  "blocks_per_second": 1.7,
+  "head_block": 59612039,
+  "head_lag_s": 3.5,
+  "head_tx_count": 58,
+  "getLogs_swaps": {
+   "blocks": 300,
+   "ms": 3284,
+   "logs": 2606,
+   "by_kind": {
+    "v4_swap": 1905,
+    "curve_sell": 293,
+    "curve_buy": 408
+   },
+   "distinct_txs": 2181,
+   "distinct_emitters": 54
+  },
+  "v4_swap_logs_from_pool_manager": 1905,
+  "v4_swap_logs_from_other_addresses": 0,
+  "getLogs_transfers": {
+   "blocks": 300,
+   "ms": 3473,
+   "logs": 12859,
+   "in_swap_txs": 10137
+  },
+  "getLogs_swaps_1000_blocks": {
+   "ok": true,
+   "ms": 2694,
+   "logs": 7584
+  },
+  "getLogs_swaps_3000_blocks": {
+   "ok": false,
+   "error": "rpc error -32000: logs matched by query exceeds limit of 10000"
+  },
+  "historical_state_5000_blocks_back": "ok"
+ },
+ "alchemy": {
+  "configured": true,
+  "blockNumber_latency_ms": {
+   "min": 111,
+   "median": 116,
+   "max": 656
+  },
+  "head_block": 59612227,
+  "getLogs_10_blocks": {
+   "ok": true,
+   "ms": 288,
+   "logs": 98
+  },
+  "getLogs_40_blocks": {
+   "ok": false,
+   "error": "Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range. Based on your parameters, this block range should work: [0x38d9c07, 0x3"
+  },
+  "eth_getBlockReceipts": {
+   "ok": true,
+   "ms": 126,
+   "receipts": 62
+  },
+  "batch_50_block_headers": {
+   "ms": 602,
+   "returned": 50
+  },
+  "receipt_lookup": {
+   "ms": 111,
+   "logs_in_receipt": 6
+  }
+ },
+ "hypersync": {
+  "url": "https://robinhood.hypersync.xyz",
+  "token_configured": false,
+  "height": 59612233,
+  "height_ms": 622,
+  "query_ok": false,
+  "query_error": "hypersync: 401 (API token missing or invalid)"
+ },
+ "blockscout": {
+  "url": "https://robinhoodchain.blockscout.com",
+  "status": 403,
+  "content_type": "text/html; charset=UTF-8",
+  "json_ok": false,
+  "note": "Cloudflare challenge page (\"Just a moment...\") returned to a script"
+ },
+ "geckoterminal": {
+  "network": "robinhood",
+  "status": 200,
+  "dexes": [
+   "uniswap-v2-robinhood",
+   "uniswap-v3-robinhood",
+   "uniswap-v4-robinhood",
+   "pancakeswap-v3-robinhood",
+   "pancakeswap-v2-robinhood",
+   "bankr-robinhood",
+   "virtuals-robinhood",
+   "robinswap",
+   "hoodit",
+   "pons-dot-family",
+   "clanker-robinhood",
+   "easya-kickstart-robinhood",
+   "swaphood-finance-v2",
+   "swaphood-finance-v3",
+   "mint-club-robinhood",
+   "sushiswap-v2-robinhood",
+   "sushiswap-v3-robinhood",
+   "curve-robinhood",
+   "up-v3",
+   "sectorone-v2-2-robinhood",
+   "sectorone-v2-0-robinhood",
+   "parityswap",
+   "pons-v2",
+   "pons-v2-dex",
+   "ekubo-v3-robinhood",
+   "uniswap-pools-trade",
+   "ramses-v3-robinhood",
+   "ramses-dlmm-robinhood",
+   "ramses-legacy-robinhood",
+   "giga-v3",
+   "giga-v2",
+   "alandale",
+   "alandale-cl",
+   "orvex-v2",
+   "orvex-v4",
+   "synthra-robinhood",
+   "rubicon-robinhood",
+   "rubicon-clmm-robinhood",
+   "o1-launchpad-robinhood",
+   "brownfi-v3-robinhood"
+  ],
+  "dex_count": 40,
+  "pons_ids": [
+   "pons-dot-family",
+   "pons-v2",
+   "pons-v2-dex"
+  ]
+ },
+ "rpc_stats": {
+  "calls": 74,
+  "batches": 1,
+  "rate_limited": 0,
+  "errors": 2,
+  "retries": 0,
+  "mb_in": 17.9,
+  "per_host": {
+   "public": {
+    "calls": 14,
+    "rate_limited": 0,
+    "errors": 0
+   },
+   "alchemy": {
+    "calls": 11,
+    "rate_limited": 0,
+    "errors": 0
+   }
+  },
+  "public_latency_ms": {
+   "median": 264,
+   "p90": 544,
+   "n": 14
+  },
+  "alchemy_latency_ms": {
+   "median": 116,
+   "p90": 288,
+   "n": 11
+  }
+ }
+}
