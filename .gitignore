@@ -16,3 +16,5 @@ demo/raw/
 .DS_Store
 demo/raw/*.webm
 demo/out/*.mp4
+data/*.log
+data/serve.pid
