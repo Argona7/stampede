@@ -1,0 +1,3 @@
+walkthrough source: raw/walkthrough.webm (Playwright recordVideo, 1440x900)
+cut-5s-trufflehog-to-lunar.mp4: source offset 32.0s, 5.0s, caption-select.png overlaid
+cut-5s-new-events.mp4: source offset 26.4s, 5.0s, caption-events.png overlaid

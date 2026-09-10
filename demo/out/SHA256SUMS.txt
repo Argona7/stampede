@@ -1,0 +1,4 @@
+47e2e69841b990e02b4b98fabf9fc62a23f68a065a1f31df468f1595ed90eca6  raw/walkthrough.webm
+fb8eabaa75226fe586b534bd18463d6d943233d496ddcecbd2c6a47a76c4fe2b  out/cut-5s-new-events.mp4
+6cf5346fa76dc3843ff40235bdce4e60450fb298b43bfbd96b0e1008f29c8359  out/cut-5s-trufflehog-to-lunar.mp4
+57d775a42ef62517af232189f9f41e7c794ee490a0b0f307f421c40818068937  out/walkthrough-1440x900.mp4

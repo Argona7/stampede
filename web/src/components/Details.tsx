@@ -10,12 +10,14 @@ interface Props {
   onSelect: (s: Selection) => void
 }
 
+const venueName = (v: string) => (v === 'curve' ? 'on the PONS bonding curve' : v === 'v4' ? 'in the Uniswap v4 pool' : 'on the curve and the v4 pool')
+
 function Leg({ t, label }: { t: Trade; label: string }) {
   return (
     <div className="leg">
       <span>{label}</span>
       <span>
-        <b>{amount(t.token_amount)}</b> tokens {t.quote_amount === null ? <span className="faint">(quote not attributable, two wallets traded this coin in one tx)</span> : <>for <b>{amount(t.quote_amount, 4)} {t.quote_symbol}</b></>} on {t.venue}
+        <b>{amount(t.token_amount)}</b> tokens {t.quote_amount === null ? <span className="faint">(quote not attributable, two wallets traded this coin in one tx)</span> : <>for <b>{amount(t.quote_amount, 4)} {t.quote_symbol}</b></>} {venueName(t.venue)}
       </span>
       <span />
       <span className="mono">
@@ -57,7 +59,7 @@ export default function Details({ selection, edge, token, loading, error, onSele
     return (
       <aside className="detail">
         <h1>Nothing selected</h1>
-        <div className="sub">Click an edge to see which wallets moved and the transactions behind it. Click a coin for its buyers, sellers and the edges touching it.</div>
+        <div className="sub">Click an edge to see which wallets sold one coin and then bought the other, with the transactions behind it. Click a coin for its buyers, sellers and the edges touching it.</div>
         <div className="meaning">
           An edge from A to B means: distinct addresses that sold A and then bought B inside the pairing window. Same address, observed order of trades. It is not proof that the sale paid for the purchase, that addresses share an owner, or that anything will happen next.
         </div>
@@ -101,7 +103,8 @@ export default function Details({ selection, edge, token, loading, error, onSele
         </div>
         <div className="meaning">{edge.meaning}</div>
         <h2>
-          Evidence: {edge.sequences.length} of {edge.sequences_total} sequences{edge.truncated ? ' (most recent shown)' : ''}
+          Observed sequences: {edge.sequences_total}
+          {edge.truncated ? `, ${edge.sequences.length} most recent shown` : ''}. A wallet appears once per sequence, so this can exceed the wallet count.
         </h2>
         {edge.sequences.map((s) => (
           <SequenceRow key={s.id} s={s} />

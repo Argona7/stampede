@@ -134,8 +134,13 @@ export default function MapCanvas({ nodes, edges, selection, showAmbiguous, fres
       connected.add(selNode)
     }
 
-    // edges
-    for (const l of linksRef.current) {
+    // edges: selected and freshly confirmed ones are drawn last so they sit on top of the rest
+    const ordered = [...linksRef.current].sort((a, b) => {
+      const ra = (selEdge === a.key ? 2 : 0) + (freshRef.current.has(a.key) && now - (freshRef.current.get(a.key) ?? 0) < PULSE_MS ? 1 : 0)
+      const rb = (selEdge === b.key ? 2 : 0) + (freshRef.current.has(b.key) && now - (freshRef.current.get(b.key) ?? 0) < PULSE_MS ? 1 : 0)
+      return ra - rb
+    })
+    for (const l of ordered) {
       const s = l.source as SimNode
       const t = l.target as SimNode
       if (s.x === undefined || t.x === undefined) continue

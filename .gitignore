@@ -14,3 +14,5 @@ web/test-results/
 web/playwright-report/
 demo/raw/
 .DS_Store
+demo/raw/*.webm
+demo/out/*.mp4
