@@ -26,7 +26,7 @@ export default function Caption({ edge, token, session, liveLastTs, onOpenEviden
           SOLD {edge.from.symbol} → <span className="to">BOUGHT {edge.to.symbol}</span>
         </div>
         <div className="meta">
-          within {windowName(edge.window_s)} · <b>observed sequences</b> · {edge.sequences_total} rows, ambiguous {edge.wallets_by_grade.ambiguous ?? 0} not counted
+          <b>{edge.wallets_main}</b> distinct wallets within {windowName(edge.window_s)} · <b>{edge.sequences_total}</b> observed sequence rows · ambiguous {edge.wallets_by_grade.ambiguous ?? 0} not counted
         </div>
         <div className="meta">
           {modeLabel} · {utc(clock)} UTC

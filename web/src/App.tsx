@@ -3,6 +3,7 @@ import { api } from './client'
 import Caption from './components/Caption'
 import CoinDrawer from './components/CoinDrawer'
 import Flow from './components/Flow'
+import MapBar from './components/MapBar'
 import MapHud from './components/MapHud'
 import Radar from './components/Radar'
 import { DEFAULT_RADAR, type RadarFilters } from './radarFilters'
@@ -11,7 +12,7 @@ import Details, { SequenceRow } from './components/Details'
 import Tape, { type TapeApi } from './components/Tape'
 import MapCanvas from './components/MapCanvas'
 import Ticker from './components/Ticker'
-import TopStrip from './components/TopStrip'
+import TopStrip, { type View } from './components/TopStrip'
 import Scene3D, { type PerfStats, type Pulse, type ViewState } from './scene/Scene3D'
 import { sessionApi } from './session'
 import { utc, windowName } from './format'
@@ -23,6 +24,7 @@ const STATUS_POLL_MS = 5000
 const TOUR_MS = 7000
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const asView = (v: string | null): View => (v === 'flow' || v === 'map' ? v : 'radar')
 
 export default function App() {
   const params = new URLSearchParams(window.location.search)
@@ -41,7 +43,8 @@ export default function App() {
   const [pulses, setPulses] = useState<Pulse[]>([])
   const [freshRows, setFreshRows] = useState<Set<string>>(new Set())
   const [feed, setFeed] = useState<SeqEvent[]>([])
-  const [layout, setLayout] = useState<'explore' | 'presentation'>(params.get('layout') === 'presentation' ? 'presentation' : 'explore')
+  // autopilot is a presentation feature: asking for it opens the presentation layout
+  const [layout, setLayout] = useState<'explore' | 'presentation'>(params.get('layout') === 'presentation' || params.get('autopilot') === '1' ? 'presentation' : 'explore')
   const [renderer, setRenderer] = useState<'3d' | '2d'>(params.get('renderer') === '2d' ? '2d' : '3d')
   const [viewState, setViewState] = useState<ViewState>('overview')
   const [evidenceOpen, setEvidenceOpen] = useState(false)
@@ -55,8 +58,8 @@ export default function App() {
   const inFlight = useRef(false)
   const showPerf = params.get('perf') === '1'
   // ---- radar / flow / coin ----
-  const initialView = (params.get('view') as 'radar' | 'flow' | 'map' | null) ?? 'radar'
-  const [view, setView] = useState<'radar' | 'flow' | 'map'>(initialView === 'flow' || initialView === 'map' ? initialView : 'radar')
+  const [startView] = useState<View>(asView(params.get('view')))
+  const [view, setView] = useState<View>(startView)
   const [radarFilters, setRadarFilters] = useState<RadarFilters>(DEFAULT_RADAR)
   const [radarData, setRadarData] = useState<RadarResponse | null>(null)
   const [alerts, setAlerts] = useState<AlertsResponse | null>(null)
@@ -271,6 +274,7 @@ export default function App() {
     setCoinAddr(addr)
     setView('flow')
   }, [])
+  const presentation = layout === 'presentation'
 
   // ---- autopilot: in MAP presentation, tour the top radar coins (fly -> caption -> next); any manual
   // interaction stops it. Every stop is a real edge with its computed count, in the order the radar ranks them.
@@ -281,7 +285,7 @@ export default function App() {
   graphRef.current = graph
   const visited = useRef<Set<string>>(new Set())
   useEffect(() => {
-    if (!autopilot || view !== 'map' || !graph?.edges.length) return
+    if (!autopilot || view !== 'map' || !presentation || !graph?.edges.length) return
     const step = () => {
       // the strongest observed flows in the range *as of now*, biggest first, each pair visited once per round
       const g = graphRef.current
@@ -312,16 +316,21 @@ export default function App() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autopilot, view, graph === null])
+  }, [autopilot, view, presentation, graph === null])
   const stopAutopilot = useCallback(() => setAutopilot(false), [])
   useEffect(() => {
     if (!autopilot) return
     const off = () => stopAutopilot()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'a' && e.key !== 'A') stopAutopilot()
+    }
     window.addEventListener('pointerdown', off)
     window.addEventListener('wheel', off, { passive: true })
+    window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('pointerdown', off)
       window.removeEventListener('wheel', off)
+      window.removeEventListener('keydown', onKey)
     }
   }, [autopilot, stopAutopilot])
 
@@ -359,37 +368,43 @@ export default function App() {
     setFocusNonce((n) => n + 1)
     if (!s) setViewState('overview')
   }, [])
+  // brand click: back to the view the page opened with; clock, filters and selection stay as they are
+  const goHome = useCallback(() => setView(startView), [startView])
   // automation hook (demo recording, tests): same code path as a click
   useEffect(() => {
     ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
-    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, coin: coinAddr, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current })
-    ;(window as unknown as { __stampede_view?: (v: 'radar' | 'flow' | 'map') => void }).__stampede_view = setView
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, startView, coin: coinAddr, drawerOpen, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current, reduced })
+    ;(window as unknown as { __stampede_view?: (v: View) => void }).__stampede_view = setView
     ;(window as unknown as { __stampede_coin?: (a: string) => void }).__stampede_coin = openFlow
-  }, [select, viewState, selection, layout, renderer, graph, session, view, coinAddr, radarData, openFlow, autopilot])
+  }, [select, viewState, selection, layout, renderer, graph, session, view, startView, coinAddr, drawerOpen, radarData, openFlow, autopilot, reduced])
 
-  // keys: E evidence, Esc back, P presentation, space play/pause
+  // keys: 1/2/3 views, E evidence, Esc back, P presentation, T tape, D coin details, A autopilot, space play/pause
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT') return
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
       if (e.key === 'Escape') {
         if (drawerOpen) setDrawerOpen(false)
+        else if (view === 'flow') setView('radar')
+        else if (view === 'radar') setCoinAddr(null)
         else select(null)
-      } else if (e.key === 'a' || e.key === 'A') setAutopilot((v) => !v)
-      else if (e.key === '1') setView('radar')
+      } else if (e.key === '1') setView('radar')
       else if (e.key === '2') setView('flow')
       else if (e.key === '3') setView('map')
-      else if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
-      else if (e.key === 'p' || e.key === 'P') setLayout((l) => (l === 'presentation' ? 'explore' : 'presentation'))
-      else if (e.key === 't' || e.key === 'T') setShowTape((v) => !v)
-      else if ((e.key === 'd' || e.key === 'D') && coinAddr) setDrawerOpen((v) => !v)
+      else if ((e.key === 'd' || e.key === 'D') && coinAddr && view !== 'map') setDrawerOpen((v) => !v)
       else if (e.key === ' ' && session?.controls) {
         e.preventDefault()
         control('toggle')
+      } else if (view === 'map') {
+        if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
+        else if (e.key === 'p' || e.key === 'P') setLayout((l) => (l === 'presentation' ? 'explore' : 'presentation'))
+        else if (e.key === 't' || e.key === 'T') setShowTape((v) => !v)
+        else if ((e.key === 'a' || e.key === 'A') && presentation) setAutopilot((v) => !v)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [select, control, session?.controls, drawerOpen, coinAddr])
+  }, [select, control, session?.controls, drawerOpen, coinAddr, view, presentation])
 
   const recent: Recent[] = useMemo(
     () =>
@@ -406,115 +421,197 @@ export default function App() {
     return session.from_ts && session.to_ts ? { min: session.from_ts, max: session.to_ts } : null
   }, [session, mode, liveLastTs])
 
-  const hotCoins = useMemo(() => new Map((radarData?.rows ?? []).slice(0, 12).map((r) => [r.address, r.inflow_10m] as [string, number])), [radarData])
+  const hotCoins = useMemo(() => new Map((radarData?.rows ?? []).slice(0, 8).map((r) => [r.address, r.inflow_10m] as [string, number])), [radarData])
   const edgesShown = graph?.edges.length ?? 0
   const edgesTotal = graph?.totals.edges_matching ?? 0
-  const presentation = layout === 'presentation'
   const stale = status?.connection === 'stale'
+  // a coin picked in the search: selected on the map, opened in the drawer elsewhere
+  const pickCoin = useCallback(
+    (addr: string) => {
+      if (view === 'map') select({ kind: 'token', address: addr })
+      else openCoin(addr)
+    },
+    [view, select, openCoin],
+  )
 
   const mapView = view === 'map'
+  const approx = edge?.sequences.some((s) => !s.sell.ts_exact || !s.buy.ts_exact) ?? false
   return (
-    <div className={`app ${presentation || !mapView ? 'presentation' : ''} view-${view}`}>
-      <TopStrip status={status} session={session} statusError={statusError} layout={layout} renderer={renderer} edgesShown={edgesShown} edgesTotal={edgesTotal} onLayout={setLayout} onRenderer={setRenderer} onControl={control} onSelect={(s) => (s?.kind === 'token' ? openCoin(s.address) : select(s))} view={view} onView={setView} />
+    <div className={`app view-${view} ${presentation ? 'presentation' : 'explore'} ${mapView && !presentation ? 'has-ticker' : ''} ${reduced ? 'reduced' : ''}`}>
+      <TopStrip status={status} session={session} statusError={statusError} view={view} startView={startView} onView={setView} onHome={goHome} onControl={control} />
       {view === 'radar' && (
-        <main className="main radar-main">
-          <Radar data={radarData} alerts={alerts} session={session} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} onSelect={openCoin} onFlow={openFlow} freshTokens={freshTokens} />
+        <main className={`main radar-main ${drawerOpen ? 'has-drawer' : ''}`}>
+          <Radar data={radarData} alerts={alerts} session={session} error={statusError} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} active={view === 'radar'} onSelect={openCoin} onMove={setCoinAddr} onFlow={openFlow} onPick={pickCoin} freshTokens={freshTokens} />
           {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={openCoin} />}
         </main>
       )}
       {view === 'flow' && (
-        <main className="main flow-main">
-          <Flow coin={coin} loading={coinLoading} onFocus={(a) => setCoinAddr(a)} onEdge={(s) => { select(s); setView('map'); setLayout('presentation') }} fresh={freshEdges} windowS={session?.window_s ?? 1800} />
-          {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={(a) => setCoinAddr(a)} />}
-          {!drawerOpen && coin && (
-            <button className="drawer-toggle" onClick={() => setDrawerOpen(true)}>
-              Coin details (D)
-            </button>
-          )}
+        <main className={`main flow-main ${drawerOpen && coin ? 'has-drawer' : ''}`}>
+          <Flow
+            coin={coin}
+            coinAddr={coinAddr}
+            loading={coinLoading}
+            drawerOpen={drawerOpen}
+            onFocus={(a) => setCoinAddr(a)}
+            onEdge={(s) => {
+              select(s)
+              setView('map')
+              setLayout('presentation')
+            }}
+            onBack={() => setView('radar')}
+            onToggleDrawer={() => setDrawerOpen((v) => !v)}
+            fresh={freshEdges}
+            windowS={session?.window_s ?? 1800}
+          />
+          {drawerOpen && coin && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={(a) => setCoinAddr(a)} />}
         </main>
       )}
       {view === 'map' && (
-      <main className="main">
-        {!presentation && <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} session={session} onControl={control} />}
-        <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''} ${presentation && showTape && !evidenceOpen ? 'has-tape' : ''}`} aria-label="Rotation map">
-          {renderer === '3d' ? (
-            <Scene3D
-              nodes={graph?.nodes ?? []}
-              edges={graph?.edges ?? []}
+        <main className={`main map-main ${presentation ? 'presentation' : ''}`}>
+          {!presentation && (
+            <MapBar
+              session={session}
+              clock={toTs}
+              spanS={filters.spanS}
+              windowS={filters.windowS}
+              edgesShown={edgesShown}
+              edgesTotal={edgesTotal}
+              renderer={renderer}
               selection={selection}
-              showAmbiguous={filters.showAmbiguous}
-              pulses={pulses}
-              viewState={viewState}
-              reducedMotion={reduced}
-              onSelect={select}
-              onHover={setHover}
-              onViewState={setViewState}
-              onPerf={setPerf}
-              focusNonce={focusNonce}
-              labelBudget={presentation ? 14 : 22}
-              panelOpen={presentation && evidenceOpen}
-              revealAt={revealAt}
-              revealRange={fromTs !== null && toTs !== null ? { from: fromTs, to: toTs } : null}
-              hudRight={presentation && showTape && !evidenceOpen ? 470 : 0}
-              hudLeft={presentation ? 384 : 0}
-              hot={hotCoins}
+              onRenderer={setRenderer}
+              onLayout={() => setLayout('presentation')}
+              onControl={control}
+              onPick={pickCoin}
+              onBack={() => select(null)}
             />
-          ) : (
-            <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={new Map(pulses.map((p) => [p.key, p.at]))} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
           )}
-          {presentation && showTape && !evidenceOpen && (
-            <div className="tape-wrap" aria-label="Observed sequences tape">
-              <Tape onReady={(api) => (tapeRef.current = api)} />
-            </div>
-          )}
-          <div className="corner">
-            <span>
-              <b>{viewState.toUpperCase()}</b>
-            </span>
-            {mode !== 'live' && status && <span>{mode === 'replay' ? 'REPLAY' : 'RECORDED'} · {status.sample.label}</span>}
-            {stale && <span className="badge stale">STALE · data age {status?.data.age_s ?? '?'} s</span>}
-            {presentation && (
-              <button className={autopilot ? 'on' : ''} onClick={() => setAutopilot((v) => !v)} style={{ pointerEvents: 'auto' }} data-testid="autopilot">
-                {autopilot ? 'Autopilot on (A)' : 'Autopilot (A)'}
-              </button>
+          {!presentation && <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} session={session} onControl={control} />}
+          <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''} ${presentation && showTape && !evidenceOpen ? 'has-tape' : ''} ${presentation && evidenceOpen && edge ? 'has-panel' : ''}`} aria-label="Rotation map">
+            {renderer === '3d' ? (
+              <Scene3D
+                nodes={graph?.nodes ?? []}
+                edges={graph?.edges ?? []}
+                selection={selection}
+                showAmbiguous={filters.showAmbiguous}
+                pulses={pulses}
+                viewState={viewState}
+                reducedMotion={reduced}
+                drift={presentation}
+                onSelect={select}
+                onHover={setHover}
+                onViewState={setViewState}
+                onPerf={setPerf}
+                focusNonce={focusNonce}
+                labelBudget={presentation ? 14 : 22}
+                panelOpen={presentation && evidenceOpen}
+                revealAt={revealAt}
+                revealRange={fromTs !== null && toTs !== null ? { from: fromTs, to: toTs } : null}
+                hudRight={presentation && showTape && !evidenceOpen ? 470 : 0}
+                hudLeft={presentation ? 384 : 0}
+                hot={hotCoins}
+              />
+            ) : (
+              <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={new Map(pulses.map((p) => [p.key, p.at]))} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
             )}
-          </div>
-          {presentation && <MapHud radar={radarData} graph={graph} feed={feed} fresh={freshTokens} clock={toTs} selection={selection} onPick={(from, to) => { setAutopilot(false); select({ kind: 'edge', from, to }) }} />}
-          {showPerf && perf && (
-            <div className="perf">
-              {perf.fps} fps · p50 {perf.p50_ms} ms · p95 {perf.p95_ms} ms · {perf.drawn_edges} edges · {perf.nodes} nodes
-            </div>
-          )}
-          {statusError && <div className="overlay-msg">API not reachable: {statusError}. Nothing here is live.</div>}
-          {!statusError && graph && graph.edges.length === 0 && <div className="overlay-msg">No edges with at least {filters.minWallets} wallets in this range. Lower the minimum or move the clock.</div>}
-          {!statusError && mode === 'live' && toTs === null && <div className="overlay-msg">Waiting for the first live block. Nothing is drawn until the tail has indexed real data.</div>}
-          {presentation && (viewState === 'evidence' || selection) && (edge || token) && (
-            <Caption edge={edge} token={token} session={session} liveLastTs={liveLastTs} onOpenEvidence={() => setEvidenceOpen((v) => !v)} onBack={() => select(null)} evidenceOpen={evidenceOpen} />
-          )}
-          {presentation && evidenceOpen && edge && (
-            <aside className="evidence-panel" aria-label="Evidence rows">
-              <h1>
-                {edge.from.symbol} → {edge.to.symbol}
-              </h1>
-              <div className="sub">
-                {edge.from.short} → {edge.to.short} · {edge.wallets_main} wallets · {edge.sequences_total} sequences · ≈ marks interpolated block time
+            {presentation && showTape && !evidenceOpen && (
+              <div className="tape-wrap" aria-label="Observed sequences tape">
+                <Tape onReady={(api) => (tapeRef.current = api)} reduced={reduced} />
               </div>
-              {edge.sequences.map((s) => (
-                <SequenceRow key={s.id} s={s} fresh={freshRows.has(String(s.id))} />
-              ))}
-            </aside>
-          )}
-          <div className="legend">
-            <span>
-              <b>Edge A → B</b>: distinct wallets that sold A, then bought B within {filters.windowS / 60} min. Width = wallets; dashed = ambiguous only. Distance on the map is layout, not a fact.
-            </span>
-            <span>
-              {hover?.kind === 'edge' ? `${graph?.nodes.find((n) => n.address === hover.from)?.symbol ?? ''} → ${graph?.nodes.find((n) => n.address === hover.to)?.symbol ?? ''}` : hover?.kind === 'token' ? graph?.nodes.find((n) => n.address === hover.address)?.symbol : renderer === '3d' ? 'drag to orbit · wheel to zoom · click a coin or a line' : 'scroll to zoom · drag to pan'}
-            </span>
-          </div>
-        </section>
-        {!presentation && <Details selection={selection} edge={edge} token={token} loading={detailLoading} error={detailError} onSelect={select} freshRows={freshRows} />}
-      </main>
+            )}
+            <div className="corner">
+              <span>
+                <b>{viewState.toUpperCase()}</b>
+              </span>
+              {mode !== 'live' && status && <span>{mode === 'replay' ? 'REPLAY' : 'RECORDED'} · {status.sample.label}</span>}
+              {stale && <span className="badge stale">STALE · data age {status?.data.age_s ?? '?'} s</span>}
+              {presentation && (
+                <>
+                  <button className={autopilot ? 'on' : ''} onClick={() => setAutopilot((v) => !v)} aria-pressed={autopilot} data-testid="autopilot">
+                    {autopilot ? 'Autopilot on (A)' : 'Autopilot (A)'}
+                  </button>
+                  <button onClick={() => setLayout('explore')} aria-label="Toggle presentation layout" data-testid="layout-toggle">
+                    Explore (P)
+                  </button>
+                </>
+              )}
+            </div>
+            {presentation && <MapHud radar={radarData} graph={graph} feed={feed} fresh={freshTokens} clock={toTs} selection={selection} onPick={(from, to) => { setAutopilot(false); select({ kind: 'edge', from, to }) }} />}
+            {showPerf && perf && (
+              <div className="perf">
+                {perf.fps} fps · p50 {perf.p50_ms} ms · p95 {perf.p95_ms} ms · {perf.drawn_edges} edges · {perf.nodes} nodes
+              </div>
+            )}
+            {statusError && (
+              <div className="overlay-msg">
+                <div className="state-block err" role="alert">
+                  <div>
+                    <b>API not reachable</b>
+                    {statusError} · nothing here is live. Is `stampede demo` (or `stampede serve`) still running in its terminal?
+                  </div>
+                </div>
+              </div>
+            )}
+            {!statusError && !graph && toTs !== null && (
+              <div className="overlay-msg">
+                <div className="state-block">
+                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <div>
+                    <b>Loading MAP</b>
+                    asking /api/graph for the flows in {utc(fromTs)}–{utc(toTs)} UTC…
+                  </div>
+                </div>
+              </div>
+            )}
+            {!statusError && graph && graph.edges.length === 0 && (
+              <div className="overlay-msg">
+                <div className="state-block">
+                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <div>
+                    <b>No flows to draw</b>
+                    no edge has {filters.minWallets}+ wallets in {utc(fromTs)}–{utc(toTs)} UTC. Next: lower “min wallets on an edge” in the left rail, or move the clock.
+                  </div>
+                </div>
+              </div>
+            )}
+            {!statusError && mode === 'live' && toTs === null && (
+              <div className="overlay-msg">
+                <div className="state-block">
+                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <div>
+                    <b>Waiting for the first live block</b>
+                    nothing is drawn until the tail has indexed real data.
+                  </div>
+                </div>
+              </div>
+            )}
+            {presentation && (viewState === 'evidence' || selection) && (edge || token) && (
+              <Caption edge={edge} token={token} session={session} liveLastTs={liveLastTs} onOpenEvidence={() => setEvidenceOpen((v) => !v)} onBack={() => select(null)} evidenceOpen={evidenceOpen} />
+            )}
+            {presentation && evidenceOpen && edge && (
+              <aside className="evidence-panel" aria-label="Evidence rows">
+                <h1>
+                  {edge.from.symbol} → {edge.to.symbol}
+                </h1>
+                <div className="sub">
+                  <b>{edge.wallets_main}</b> distinct wallets · <b>{edge.sequences_total}</b> sequence rows{edge.truncated ? ` (${edge.sequences.length} most recent shown)` : ''} · A {edge.from.short} → B {edge.to.short}
+                  {approx ? ' · “approx.” = interpolated block time' : ''}
+                </div>
+                {edge.sequences.map((s) => (
+                  <SequenceRow key={s.id} s={s} fresh={freshRows.has(String(s.id))} />
+                ))}
+              </aside>
+            )}
+            <div className="legend">
+              <span title={`A line from A to B = distinct wallets that sold A, then bought B within ${filters.windowS / 60} min. Width = wallets; dashed = ambiguous only. Distance on the map is layout, not a fact.`}>
+                <b>Line A → B</b>: distinct wallets that sold A, then bought B within {filters.windowS / 60} min · width = wallets · dashed = ambiguous only · distance is layout, not a fact
+              </span>
+              <span>
+                {hover?.kind === 'edge' ? `${graph?.nodes.find((n) => n.address === hover.from)?.symbol ?? ''} → ${graph?.nodes.find((n) => n.address === hover.to)?.symbol ?? ''}` : hover?.kind === 'token' ? graph?.nodes.find((n) => n.address === hover.address)?.symbol : renderer === '3d' ? 'drag to orbit · wheel to zoom · click a coin or a line' : 'scroll to zoom · drag to pan'}
+              </span>
+            </div>
+          </section>
+          {!presentation && <Details selection={selection} edge={edge} token={token} loading={detailLoading} error={detailError} onSelect={select} freshRows={freshRows} />}
+        </main>
       )}
       {view === 'map' && !presentation && <Ticker status={status} session={session} recent={recent} freshKeys={freshRows} onSelect={select} />}
     </div>

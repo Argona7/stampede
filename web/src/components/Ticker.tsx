@@ -11,15 +11,15 @@ interface Props {
 
 export default function Ticker({ status, session, recent, freshKeys, onSelect }: Props) {
   const mode = session?.mode ?? status?.mode ?? 'fixture'
-  const title = mode === 'live' ? 'Observed sequences, newest first' : mode === 'replay' ? 'Sequences reached by the replay clock' : 'Latest sequences in the recorded range'
+  const title = mode === 'live' ? 'Sequences · newest first' : mode === 'replay' ? 'Sequences at the clock' : 'Latest sequences'
   return (
-    <footer className="ticker">
+    <footer className="ticker" aria-label="Recent sequences">
       <div className="label">
         <b>{title}</b>
-        {mode === 'fixture' ? 'Static list. Nothing arrives here because the sample is a recording.' : 'A row appears when a buy transaction confirms and pairs with an earlier sell by the same wallet. Red mark = received since the previous poll.'}
+        {mode === 'fixture' ? 'static list: the sample is a recording' : 'time · wallet · sold → bought · gap · red = since the last poll'}
       </div>
       <ol>
-        {recent.length === 0 && <li className="faint">No direct or clean sequences in the selected range.</li>}
+        {recent.length === 0 && <li className="faint">No direct or clean sequences reached in this range yet — press Play or seek forward.</li>}
         {recent.map((r) => {
           const key = `${r.from}->${r.to}`
           return (

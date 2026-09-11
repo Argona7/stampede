@@ -1,145 +1,127 @@
-import { useEffect, useRef, useState } from 'react'
-import { api } from '../client'
-import { duration, utc, windowName } from '../format'
-import type { Selection, SessionState, Status, TokenLabel } from '../types'
+import { useRef } from 'react'
+import { duration, utc } from '../format'
+import type { SessionState, Status } from '../types'
+
+export type View = 'radar' | 'flow' | 'map'
+const VIEWS: View[] = ['radar', 'flow', 'map']
+const SPEEDS = [1, 10, 20, 60]
 
 interface Props {
   status: Status | null
   session: SessionState | null
   statusError: string | null
-  layout: 'explore' | 'presentation'
-  renderer: '3d' | '2d'
-  edgesShown: number
-  edgesTotal: number
-  onLayout: (l: 'explore' | 'presentation') => void
-  onRenderer: (r: '3d' | '2d') => void
+  view: View
+  startView: View
+  onView: (v: View) => void
+  onHome: () => void
   onControl: (action: string, extra?: Record<string, number | undefined>) => void
-  onSelect: (s: Selection) => void
-  view: 'radar' | 'flow' | 'map'
-  onView: (v: 'radar' | 'flow' | 'map') => void
 }
 
-export default function TopStrip({ status, session, statusError, layout, renderer, edgesShown, edgesTotal, onLayout, onRenderer, onControl, onSelect, view, onView }: Props) {
-  const [text, setText] = useState('')
-  const [hits, setHits] = useState<TokenLabel[]>([])
-  const [open, setOpen] = useState(false)
-  const timer = useRef<number | null>(null)
-  useEffect(() => {
-    if (timer.current) window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => {
-      if (text.trim().length < 2) {
-        setHits([])
-        return
-      }
-      api
-        .search(text)
-        .then((h) => {
-          setHits(h)
-          setOpen(true)
-        })
-        .catch(() => setHits([]))
-    }, 180)
-  }, [text])
-
+/** Persistent top strip: brand · views · session state · the primary replay controls. Secondary controls live
+ *  in each view's working row. */
+export default function TopStrip({ status, session, statusError, view, startView, onView, onHome, onControl }: Props) {
+  const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const mode = session?.mode ?? status?.mode ?? 'fixture'
   const conn = status?.connection
-  const errorText = statusError ? `API UNREACHABLE · ${statusError}` : conn === 'error' ? `PROVIDER ERROR · ${status?.live?.last_error ?? 'no connection'} · frozen at the last good block` : null
-  const paused = mode === 'replay' && session && !session.playing
+  const errorText = statusError
+    ? `API unreachable · ${statusError}`
+    : conn === 'error'
+      ? `Provider error · ${status?.live?.last_error ?? 'no connection'} · frozen at the last good block`
+      : null
+  const paused = mode === 'replay' && !!session && !session.playing
   const badgeClass = mode === 'live' ? (conn === 'stale' ? 'stale' : 'live') : mode === 'replay' ? (paused ? 'paused' : 'replay') : 'fixture'
-  const badgeText = mode === 'live' ? (conn === 'stale' ? 'LIVE · STALE' : 'LIVE') : mode === 'replay' ? (paused ? `REPLAY ${session?.speed ?? ''}× · PAUSED` : `REPLAY ${session?.speed ?? ''}×`) : 'FIXTURE'
+  const speedTxt = session?.speed ? `${Number.isInteger(session.speed) ? session.speed : session.speed.toFixed(1)}×` : ''
+  const badgeText = mode === 'live' ? (conn === 'stale' ? 'LIVE · STALE' : 'LIVE') : mode === 'replay' ? (paused ? `PAUSED · REPLAY ${speedTxt}` : `REPLAY ${speedTxt}`) : 'RECORDED'
   const clock = session?.clock_ts ?? null
   const span = session?.span_s ?? 1800
   const age = status?.data.age_s ?? null
+  const speeds = session && !SPEEDS.includes(session.speed) ? [...SPEEDS, session.speed].sort((a, b) => a - b) : SPEEDS
+
+  const onTabKey = (e: React.KeyboardEvent, i: number) => {
+    let j = i
+    if (e.key === 'ArrowRight') j = (i + 1) % VIEWS.length
+    else if (e.key === 'ArrowLeft') j = (i + VIEWS.length - 1) % VIEWS.length
+    else if (e.key === 'Home') j = 0
+    else if (e.key === 'End') j = VIEWS.length - 1
+    else return
+    e.preventDefault()
+    onView(VIEWS[j])
+    tabs.current[j]?.focus()
+  }
 
   return (
     <header className="strip">
-      <div className="wordmark">
-        STAMPEDE
-        <small>wallet rotations · Robinhood Chain</small>
-      </div>
-      <nav className="views" aria-label="Views">
-        {(['radar', 'flow', 'map'] as const).map((v, i) => (
-          <button key={v} className={view === v ? 'on' : ''} onClick={() => onView(v)} data-testid={`view-${v}`}>
-            {i + 1} {v.toUpperCase()}
+      <a
+        className="brand"
+        href={`?view=${startView}`}
+        data-testid="brand"
+        aria-label={`STAMPEDE · back to ${startView.toUpperCase()}`}
+        title={`Back to ${startView.toUpperCase()} (keeps the clock, filters and selection)`}
+        onClick={(e) => {
+          e.preventDefault()
+          onHome()
+        }}
+      >
+        <img className="mark" src="/brand-mark.svg" width={48} height={48} alt="" />
+        <span className="wordmark">STAMPEDE</span>
+        <span className="tagline">wallet rotations · Robinhood Chain</span>
+      </a>
+      <nav className="views" role="tablist" aria-label="Views">
+        {VIEWS.map((v, i) => (
+          <button
+            key={v}
+            ref={(el) => {
+              tabs.current[i] = el
+            }}
+            role="tab"
+            aria-selected={view === v}
+            tabIndex={view === v ? 0 : -1}
+            className={view === v ? 'on' : ''}
+            onClick={() => onView(v)}
+            onKeyDown={(e) => onTabKey(e, i)}
+            data-testid={`view-${v}`}
+          >
+            <kbd>{i + 1}</kbd>
+            {v.toUpperCase()}
           </button>
         ))}
       </nav>
-      <div className="mid">
-        {errorText ? <span className="alert">{errorText}</span> : <span className={`badge ${badgeClass}`}>{badgeText}</span>}
-        <span>
-          {mode === 'live' ? 'LAST BLOCK' : 'CLOCK'} <b>{utc(clock)} UTC</b>
-        </span>
-        {mode === 'live' && age !== null && <span>DATA AGE <b>{duration(age)}</b></span>}
-        <span>
-          RANGE <b>{utc(clock ? clock - span : null)}–{utc(clock)}</b>
-        </span>
-        <span>
-          WINDOW <b>{windowName(session?.window_s ?? 1800)}</b>
-        </span>
-        {view === 'map' && (
-          <span>
-            SHOWING <b>{edgesShown}</b> OF <b>{edgesTotal}</b> EDGES
+      <div className="status">
+        {errorText ? (
+          <span className="alert" title={errorText} role="alert">
+            {errorText}
+          </span>
+        ) : (
+          <span className={`badge ${badgeClass}`} data-testid="mode">
+            {badgeText}
           </span>
         )}
-        {session?.id && <span className="faint">SESSION {session.id}</span>}
-        <div className="search">
-          <input
-            type="text"
-            placeholder="find a coin: symbol, name or address"
-            value={text}
-            aria-label="Find a coin"
-            onChange={(e) => setText(e.target.value)}
-            onFocus={() => hits.length && setOpen(true)}
-            onBlur={() => window.setTimeout(() => setOpen(false), 150)}
-          />
-          {open && hits.length > 0 && (
-            <ul>
-              {hits.map((h) => (
-                <li
-                  key={h.address}
-                  onMouseDown={() => {
-                    onSelect({ kind: 'token', address: h.address })
-                    setOpen(false)
-                    setText('')
-                  }}
-                >
-                  <span>
-                    <b>{h.symbol}</b> <span className="muted">{h.name}</span>
-                  </span>
-                  <span className="faint">{h.short}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <span className="clock">
+          <span className="k">{mode === 'live' ? 'LAST BLOCK ' : 'CLOCK '}</span>
+          <b>{utc(clock)}</b> UTC
+        </span>
+        {mode === 'live' && age !== null && (
+          <span className="clock">
+            DATA AGE <b>{duration(age)}</b>
+          </span>
+        )}
+        <span className="clock range">
+          RANGE <b>{utc(clock ? clock - span : null)}–{utc(clock)}</b>
+        </span>
       </div>
       <div className="right">
         {session?.controls && (
           <>
-            <button onClick={() => onControl('toggle')} aria-label={session.playing ? 'Pause replay' : 'Play replay'}>
+            <button className={session.playing ? 'on' : 'primary'} onClick={() => onControl('toggle')} aria-label={session.playing ? 'Pause replay' : 'Play replay'} data-testid="play">
               {session.playing ? 'Pause' : 'Play'}
             </button>
-            {[1, 10, 60].map((s) => (
-              <button key={s} className={session.speed === s ? 'on' : ''} onClick={() => onControl('speed', { speed: s })}>
-                {s}×
-              </button>
-            ))}
-            <button onClick={() => clock !== null && onControl('seek', { ts: clock - 300 })} aria-label="Seek back 5 minutes">
-              −5m
-            </button>
-            <button onClick={() => clock !== null && onControl('seek', { ts: clock + 300 })} aria-label="Seek forward 5 minutes">
-              +5m
-            </button>
-          </>
-        )}
-        {view === 'map' && (
-          <>
-            <button className={renderer === '3d' ? 'on' : ''} onClick={() => onRenderer(renderer === '3d' ? '2d' : '3d')} aria-label="Toggle renderer">
-              {renderer === '3d' ? '3D' : '2D'}
-            </button>
-            <button className={layout === 'presentation' ? 'on' : ''} onClick={() => onLayout(layout === 'presentation' ? 'explore' : 'presentation')} aria-label="Toggle presentation layout" data-testid="layout-toggle">
-              {layout === 'presentation' ? 'Explore (P)' : 'Present (P)'}
-            </button>
+            <div className="seg" role="group" aria-label="Replay speed">
+              {speeds.map((s) => (
+                <button key={s} className={session.speed === s ? 'on' : ''} onClick={() => onControl('speed', { speed: s })} aria-pressed={session.speed === s}>
+                  {Number.isInteger(s) ? s : s.toFixed(1)}×
+                </button>
+              ))}
+            </div>
           </>
         )}
       </div>

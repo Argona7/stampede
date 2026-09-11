@@ -47,6 +47,7 @@ interface Props {
   hudRight?: number // px of HUD (tape) covering the right edge: the overview is framed into the remaining width
   hot?: Map<string, number> // coins with rotation inflow in the last 10 min -> wallets (radar top rows)
   hudLeft?: number // px of HUD covering the left edge (top-inflow list)
+  drift?: boolean // presentation only: one slow bounded drift after arriving at the overview
 }
 
 const AFTERGLOW_MS = 18000
@@ -281,12 +282,10 @@ export default function Scene3D(p: Props) {
         animating = true
       }
       s.glow = keepGlow
-      // hot-coin halos breathe slowly (one cycle per 2.4 s), scaled to stay ~constant on screen
+      // hot-coin halos: scaled to stay ~constant on screen; static (no breathing)
       for (const h of s.hotGroup.children) {
         const dist = s.camera.position.distanceTo(h.position)
-        const k = Math.max(1, dist * 0.0011) * (1 + 0.08 * Math.sin(now / 380 + h.position.x))
-        h.scale.setScalar(k)
-        animating = true
+        h.scale.setScalar(Math.max(1, dist * 0.0011))
       }
       if (s.controls.enableDamping && !s.keys.length) animating = animating || false
       // frame timing (only while rendering continuously)
@@ -740,13 +739,13 @@ export default function Scene3D(p: Props) {
       const visW = 2 * home.length() * Math.tan((s.camera.fov * Math.PI) / 360) * s.camera.aspect
       const origin = new THREE.Vector3(visW * (hudR - hudL) * 0.5, 0, 0)
       const revealing = p.revealAt && performance.now() - p.revealAt < REVEAL_MS
-      if (revealing) {
-        // build-up: start far out and dolly in while the graph appears in time order
-        const far = new THREE.Vector3(0.3 * R, -0.7 * R, 2.6 * R + 400)
-        fly([{ pos: far, look: origin, dur: 1 }, { pos: home, look: origin, dur: REVEAL_MS, onDone: () => propsRef.current.onViewState('overview') }, { pos: drifted, look: origin, dur: 9000 }])
-      } else {
-        fly([{ pos: home, look: origin, dur: 900, onDone: () => propsRef.current.onViewState('overview') }, { pos: drifted, look: origin, dur: 9000 }])
-      }
+      const keys: Key[] = revealing
+        ? // build-up: start far out and dolly in while the graph appears in time order
+          [{ pos: new THREE.Vector3(0.3 * R, -0.7 * R, 2.6 * R + 400), look: origin, dur: 1 }, { pos: home, look: origin, dur: REVEAL_MS, onDone: () => propsRef.current.onViewState('overview') }]
+        : [{ pos: home, look: origin, dur: 900, onDone: () => propsRef.current.onViewState('overview') }]
+      // the working screen does not fly on its own: the drift is a presentation feature
+      if (p.drift && !instant) keys.push({ pos: drifted, look: origin, dur: 9000 })
+      fly(keys)
       return
     }
     if (p.selection.kind === 'edge') {
@@ -796,7 +795,7 @@ export default function Scene3D(p: Props) {
     const N = new THREE.Vector3(n.x, n.y, n.z)
     fly([{ pos: N.clone().add(new THREE.Vector3(90, -220, 520)), look: N.clone(), dur: 1100, onDone: () => propsRef.current.onViewState('evidence') }])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen, p.revealAt, p.hudRight, p.hudLeft])
+  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen, p.revealAt, p.hudRight, p.hudLeft, p.drift])
 
   // ---- hot coins: a thin red halo around coins with rotation inflow right now ----
   useEffect(() => {
@@ -828,10 +827,22 @@ export default function Scene3D(p: Props) {
       s.seenPulse.add(id)
       if (!s.edgePoints.has(pu.key)) continue
       if (s.activePulses.length >= 40) break
+      const label = document.createElement('div')
+      label.className = 'pulse-lbl'
+      label.textContent = `+${pu.count} sequence${pu.count === 1 ? '' : 's'}`
+      labelsRef.current?.appendChild(label)
+      // label at the B end of the edge
+      const pts = s.edgePoints.get(pu.key)!
+      const end = pts[pts.length - 1].clone().project(s.camera)
+      const r = s.renderer.domElement.getBoundingClientRect()
+      label.style.transform = `translate(${(((end.x + 1) / 2) * r.width + 10).toFixed(0)}px, ${(((1 - end.y) / 2) * r.height - 24).toFixed(0)}px)`
+      window.setTimeout(() => label.remove(), PULSE_MS + 700)
+      // reduced motion: the count is shown, nothing travels or glows
+      if (p.reducedMotion) continue
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), new THREE.MeshBasicMaterial({ color: RED }))
       s.pulseGroup.add(mesh)
       // the whole edge lights up red for the duration of the pulse (one observed batch, not money)
-      const lg = new THREE.BufferGeometry().setFromPoints(s.edgePoints.get(pu.key)!)
+      const lg = new THREE.BufferGeometry().setFromPoints(pts)
       const line = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: RED, transparent: true, opacity: 0.9 }))
       s.pulseGroup.add(line)
       if (!s.glow.some((g) => g.key === pu.key)) {
@@ -842,17 +853,7 @@ export default function Scene3D(p: Props) {
         const g = s.glow.find((x) => x.key === pu.key)!
         g.start = now
       }
-      const label = document.createElement('div')
-      label.className = 'pulse-lbl'
-      label.textContent = `+${pu.count} sequence${pu.count === 1 ? '' : 's'}`
-      labelsRef.current?.appendChild(label)
-      s.activePulses.push({ key: pu.key, count: pu.count, start: p.reducedMotion ? now - PULSE_MS * 0.6 : now, mesh, line, label })
-      // label follows the marker: cheap approach, place at B end
-      const pts = s.edgePoints.get(pu.key)!
-      const end = pts[pts.length - 1].clone().project(s.camera)
-      const r = s.renderer.domElement.getBoundingClientRect()
-      label.style.transform = `translate(${(((end.x + 1) / 2) * r.width + 10).toFixed(0)}px, ${(((1 - end.y) / 2) * r.height - 24).toFixed(0)}px)`
-      window.setTimeout(() => label.remove(), PULSE_MS + 700)
+      s.activePulses.push({ key: pu.key, count: pu.count, start: now, mesh, line, label })
     }
     if (s.seenPulse.size > 5000) s.seenPulse.clear()
     s.needs = true

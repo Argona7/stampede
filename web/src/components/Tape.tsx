@@ -14,6 +14,7 @@ export interface TapeApi {
 interface Props {
   onReady: (api: TapeApi) => void
   width?: number
+  reduced?: boolean // prefers-reduced-motion: no streaming boot, no slide-in
 }
 
 const BOOT_MS = 2600
@@ -21,11 +22,13 @@ const ROW_H = 18
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3)
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`
 
-export default function Tape({ onReady, width = 470 }: Props) {
+export default function Tape({ onReady, width = 470, reduced = false }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
   useEffect(() => {
     const canvas = ref.current!
     const ctx = canvas.getContext('2d')!
+    const bootMs = reduced ? 1 : BOOT_MS
+    const slideMs = reduced ? 1 : 420
     let rows: SeqEvent[] = []
     let label = ''
     let bootStart = 0
@@ -55,14 +58,14 @@ export default function Tape({ onReady, width = 470 }: Props) {
       const H = canvas.height / dpr
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, W, H)
-      ctx.fillStyle = 'rgba(5,5,5,0.62)'
+      ctx.fillStyle = '#050505'
       ctx.fillRect(0, 0, W, H)
       ctx.fillStyle = '#351419'
       ctx.fillRect(0, 0, 1, H)
       let animating = false
       let count: number
       if (bootStart) {
-        const t = Math.min(1, (now - bootStart) / BOOT_MS)
+        const t = Math.min(1, (now - bootStart) / bootMs)
         shown = easeOut(t) * bootTotal
         count = Math.floor(shown)
         animating = t < 1
@@ -90,7 +93,7 @@ export default function Tape({ onReady, width = 470 }: Props) {
       const top = 72
       const nRows = Math.floor((H - top - 10) / ROW_H)
       const start = Math.max(0, count - nRows)
-      const slideT = lastPush ? Math.min(1, (now - lastPush) / 420) : 1
+      const slideT = lastPush ? Math.min(1, (now - lastPush) / slideMs) : 1
       const slide = (1 - easeOut(slideT)) * ROW_H
       if (slideT < 1) animating = true
       const baseY = H - 10 - ROW_H
@@ -158,6 +161,6 @@ export default function Tape({ onReady, width = 470 }: Props) {
       if (raf) cancelAnimationFrame(raf)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [reduced])
   return <canvas ref={ref} className="tape" aria-hidden="true" />
 }

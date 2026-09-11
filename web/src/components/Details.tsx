@@ -58,11 +58,13 @@ export function SequenceRow({ s, fresh = false }: { s: Sequence; fresh?: boolean
 export default function Details({ selection, edge, token, loading, error, onSelect, freshRows }: Props) {
   if (!selection) {
     return (
-      <aside className="detail">
-        <h1>Nothing selected</h1>
-        <div className="sub">Click an edge to see which wallets sold one coin and then bought the other, with the transactions behind it. Click a coin for its buyers, sellers and the edges touching it.</div>
-        <div className="meaning">
-          An edge from A to B means: distinct addresses that sold A and then bought B inside the pairing window. Same address, observed order of trades. It is not proof that the sale paid for the purchase, that addresses share an owner, or that anything will happen next.
+      <aside className="detail" data-testid="detail-empty">
+        <div className="state-block" style={{ padding: '10px 0' }}>
+          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <div>
+            <b>Nothing selected</b>
+            Click a line (A → B) for the wallets that sold A and then bought B, with their transactions; click a coin for its buyers, sellers and edges.
+          </div>
         </div>
       </aside>
     )
@@ -70,13 +72,28 @@ export default function Details({ selection, edge, token, loading, error, onSele
   if (error) {
     return (
       <aside className="detail">
-        <h1>Could not load</h1>
-        <div className="sub state err">{error}</div>
+        <div className="state-block err" role="alert" style={{ margin: 0 }}>
+          <div>
+            <b>Could not load the selection</b>
+            {error}
+          </div>
+        </div>
       </aside>
     )
   }
   if (selection.kind === 'edge') {
-    if (!edge || loading) return <aside className="detail"><div className="empty">Loading evidence and exact block times…</div></aside>
+    if (!edge || loading)
+      return (
+        <aside className="detail">
+          <div className="state-block" style={{ padding: '10px 0' }}>
+            <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+            <div>
+              <b>Loading evidence</b>
+              sequence rows first, then exact block times and tx senders…
+            </div>
+          </div>
+        </aside>
+      )
     const g = edge.wallets_by_grade
     return (
       <aside className="detail">
@@ -86,17 +103,17 @@ export default function Details({ selection, edge, token, loading, error, onSele
           <span role="button" tabIndex={0} style={{ cursor: 'pointer' }} onClick={() => onSelect({ kind: 'token', address: edge.to.address })}>{edge.to.symbol}</span>
         </h1>
         <div className="sub mono">
-          {edge.from.short} → {edge.to.short}
+          A {edge.from.short} → B {edge.to.short} · window {edge.window_s / 60} min
         </div>
         <div className="grades">
           <span>
-            <b>{edge.wallets_main}</b>wallets sold {edge.from.symbol}, then bought {edge.to.symbol}
+            <b>{edge.wallets_main}</b>distinct wallets
           </span>
           <span>
-            <b>{g.direct ?? 0}</b>in one transaction
+            <b>{g.direct ?? 0}</b>in one tx
           </span>
           <span>
-            <b>{g.clean ?? 0}</b>as a clean sequence
+            <b>{g.clean ?? 0}</b>clean sequence
           </span>
           <span>
             <b>{g.ambiguous ?? 0}</b>ambiguous, not counted
@@ -104,8 +121,8 @@ export default function Details({ selection, edge, token, loading, error, onSele
         </div>
         <div className="meaning">{edge.meaning}</div>
         <h2>
-          Observed sequences: {edge.sequences_total}
-          {edge.truncated ? `, ${edge.sequences.length} most recent shown` : ''}. A wallet appears once per sequence, so this can exceed the wallet count.
+          {edge.sequences_total} sequence rows
+          {edge.truncated ? ` · ${edge.sequences.length} most recent shown` : ''} · a wallet appears once per sequence, so rows can exceed wallets
         </h2>
         {edge.sequences.map((s) => (
           <SequenceRow key={s.id} s={s} fresh={!!freshRows?.has(String(s.id))} />
@@ -113,7 +130,18 @@ export default function Details({ selection, edge, token, loading, error, onSele
       </aside>
     )
   }
-  if (!token || loading) return <aside className="detail"><div className="empty">Loading coin…</div></aside>
+  if (!token || loading)
+    return (
+      <aside className="detail">
+        <div className="state-block" style={{ padding: '10px 0' }}>
+          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <div>
+            <b>Loading coin</b>
+            buyers, sellers and the edges touching it in this range…
+          </div>
+        </div>
+      </aside>
+    )
   return (
     <aside className="detail">
       <h1>{token.symbol}</h1>
