@@ -32,3 +32,5 @@ data/demo/*.sqlite
 assets/brand/concepts/*.png
 assets/brand/pixel/raw-*.png
 assets/brand/pixel/sheet-raw.png
+# the demo bundle itself ships as a release asset (stampede demo downloads it); never in the Git history
+data/demo/*.xz

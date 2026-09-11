@@ -90,6 +90,7 @@ def test_missing_bundle_is_a_clear_error(tmp_path, monkeypatch):
     import pytest
 
     with pytest.raises(SystemExit) as e:
-        demo.ensure_demo_db(bundle=tmp_path / "none.xz", dest=tmp_path / "x.sqlite")
+        demo.ensure_demo_db(bundle=tmp_path / "none.xz", dest=tmp_path / "x.sqlite")  # no url: no network, a clear message
     assert "demo bundle not found" in str(e.value)
     assert os.environ.get("STAMPEDE_DEMO_URL") is None
+    assert demo.DEFAULT_BUNDLE_URL.startswith("https://github.com/") and demo.DEFAULT_BUNDLE_URL.endswith("/stampede-demo.sqlite.xz")

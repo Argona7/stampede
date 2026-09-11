@@ -24,21 +24,22 @@ owner, or that anything will happen next.
 <a href="docs/DEMO-V5.md"><img src="docs/assets/demo-preview.gif" width="960" alt="8-second loop of the recorded replay: the tape streams the visible history, the 3D network of coins builds up in time order, the replay runs at 20x and the autopilot flies to the strongest observed route — 54 wallets sold Piecoin·1a01 and bought TruffleHog·7b08 within 30 minutes — and opens its evidence card"></a>
 
 Recorded replay · 20× · not a live market feed. The full 44-second take (terminal intro, four autopilot stops,
-RADAR, FLOW) is described frame by frame in [`docs/DEMO-V5.md`](docs/DEMO-V5.md); the MP4 itself is
-distributed with the release, not in the Git history.
+RADAR, FLOW): [`stampede-v5-autopilot.mp4`](https://github.com/Argona7/stampede/releases/download/v0.1.0/stampede-v5-autopilot.mp4)
+(16.7 MB, release asset); frame-by-frame notes in [`docs/DEMO-V5.md`](docs/DEMO-V5.md).
 
 ## Quickstart
 
-The repository ships a recorded sample: 60 minutes of PONS v2 trading on Robinhood Chain
+The release ships a recorded sample: 60 minutes of PONS v2 trading on Robinhood Chain
 (2026-09-10 16:29:57–17:29:57 UTC), 146,329 trades, 33,743 wallets, 12,164 observed sequences in the
 30-minute window. Replaying it needs no Alchemy, Twitter or other API key.
 
 Requirements: Python 3.13 with [uv](https://docs.astral.sh/uv/); Node 22+ only if you want the web views
-(the terminal UI runs on the API alone). Download: the sample bundle is 17 MB (`data/demo/stampede-demo.sqlite.xz`)
-and unpacks to 139 MB in `data/demo.sqlite` on first start.
+(the terminal UI runs on the API alone). Download: on first start `stampede demo` fetches the 17 MB sample bundle
+from the [v0.1.0 release](https://github.com/Argona7/stampede/releases/tag/v0.1.0) into `data/demo/` and unpacks
+it to 139 MB in `data/demo.sqlite`.
 
 ```sh
-git clone <repository-url> stampede && cd stampede
+git clone https://github.com/Argona7/stampede && cd stampede
 uv sync
 cd web && npm ci && npm run build && cd ..      # web views; skip for terminal-only
 uv run stampede demo                            # http://127.0.0.1:8791/  (replay 20x, paused)
@@ -51,8 +52,8 @@ uv run stampede terminal --api-url http://127.0.0.1:8791
 ```
 
 Press `space` to start the replay in either surface; both read the same server clock, so a seek in the
-browser moves the terminal too. If the checkout has no bundle, `stampede demo --bundle-url <asset-url>`
-(or `STAMPEDE_DEMO_URL`) downloads it into place first.
+browser moves the terminal too. Offline or mirrored setups: put `stampede-demo.sqlite.xz` into `data/demo/`
+yourself, or point `--bundle-url` / `STAMPEDE_DEMO_URL` at another copy.
 
 Live mode tails the chain head and needs an Alchemy key: copy `.env.example` to `.env`, fill `ALCHEMY_KEY`,
 then `uv run stampede serve --mode live`. `TWITTERAPI_KEY` is optional and only feeds the X-mentions column.

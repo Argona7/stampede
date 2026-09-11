@@ -19,6 +19,8 @@ from .store import Store
 
 BUNDLE = ROOT / "data" / "demo" / "stampede-demo.sqlite.xz"
 DEMO_DB = ROOT / "data" / "demo.sqlite"
+# the recorded sample ships as a GitHub release asset (17 MB), not in the Git history
+DEFAULT_BUNDLE_URL = "https://github.com/Argona7/stampede/releases/download/v0.1.0/stampede-demo.sqlite.xz"
 
 # copied whole: small reference tables the API joins against
 FULL_TABLES = ("blocks", "curves", "pools", "tokens", "infra", "quotes", "launches", "graduations", "launch_meta", "wallet_scores", "alerts", "x_cache")
@@ -103,9 +105,8 @@ def ensure_demo_db(refresh: bool = False, bundle: Path = BUNDLE, dest: Path = DE
     if dest.exists() and not refresh:
         return dest
     if not bundle.exists():
-        url = url or env("STAMPEDE_DEMO_URL")
         if url:
-            print(f"fetching demo bundle from {url}")
+            print(f"fetching demo bundle ({url}) → {bundle}", flush=True)
             fetch_bundle(url, bundle)
         else:
             raise SystemExit(f"demo bundle not found: {bundle}\n(download it from the release assets to that path, set STAMPEDE_DEMO_URL, or run `stampede export-demo` on a store with a recorded sample)")
@@ -136,7 +137,7 @@ def main_demo(args) -> int:
 
     from .api.app import WEB_DIST, create_app
 
-    db = ensure_demo_db(refresh=bool(getattr(args, "refresh", False)), url=getattr(args, "bundle_url", None))
+    db = ensure_demo_db(refresh=bool(getattr(args, "refresh", False)), url=getattr(args, "bundle_url", None) or env("STAMPEDE_DEMO_URL") or DEFAULT_BUNDLE_URL)
     s = Store(db)
     try:
         smp = json.loads(s.db.execute("SELECT value FROM meta WHERE key='sample_label'").fetchone()[0])

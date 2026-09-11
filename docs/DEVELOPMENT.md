@@ -32,8 +32,8 @@ bundled sample with external context off.
 
 Environment (`.env`, never printed): `ALCHEMY_KEY` (ingest, verify, live, exact block times on demand),
 `HYPERSYNC_TOKEN` (optional faster ingest), `PUBLIC_RPC`, `STAMPEDE_DB` (default `data/stampede.sqlite`),
-`TWITTERAPI_KEY` (optional X-mentions column), `STAMPEDE_DEMO_URL` (where `stampede demo` downloads the bundle from
-when the checkout has none).
+`TWITTERAPI_KEY` (optional X-mentions column), `STAMPEDE_DEMO_URL` (override of the release-asset URL `stampede demo`
+downloads the bundle from when `data/demo/` has none).
 
 ## Keys
 
