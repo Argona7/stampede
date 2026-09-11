@@ -15,13 +15,22 @@ class ApiClient:
         self.base = base_url.rstrip("/")
         self.timeout = timeout
         self._s = requests.Session()
-        self._s.headers.update({"user-agent": "stampede-tui/0.2"})
+        self._s.headers.update({"user-agent": "stampede-tui/0.3"})
+
+    def _reason(self, e: requests.RequestException) -> str:
+        """One readable line for the alert bar instead of urllib3's nested exception text."""
+        host = self.base.split("://", 1)[-1]
+        if isinstance(e, requests.ConnectionError):
+            return f"connection refused at {host} (is the server running?)"
+        if isinstance(e, requests.Timeout):
+            return f"no answer from {host} within {self.timeout:g}s"
+        return f"{type(e).__name__}: {str(e)[:80]}"
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         try:
             r = self._s.get(self.base + path, params={k: v for k, v in (params or {}).items() if v is not None}, timeout=self.timeout)
         except requests.RequestException as e:  # noqa: PERF203
-            raise ApiError(f"{type(e).__name__}: {str(e)[:120]}") from e
+            raise ApiError(self._reason(e)) from e
         if r.status_code >= 400:
             raise ApiError(f"HTTP {r.status_code} {path}")
         return r.json()
@@ -30,7 +39,7 @@ class ApiClient:
         try:
             r = self._s.post(self.base + path, json=body, timeout=self.timeout)
         except requests.RequestException as e:
-            raise ApiError(f"{type(e).__name__}: {str(e)[:120]}") from e
+            raise ApiError(self._reason(e)) from e
         if r.status_code >= 400:
             try:
                 detail = r.json().get("detail")

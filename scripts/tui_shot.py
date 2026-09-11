@@ -2,13 +2,16 @@
 """Headless TUI frames: run the real TUI against the API, drive keys, save SVG screenshots (Textual's own renderer).
 
     .venv/bin/python scripts/tui_shot.py --api-url http://127.0.0.1:8791 --size 180x50 --out demo/tui --wait 5 --keys "up,up,enter"
-Frames are exact terminal renderings (same cells, same colours) exported as SVG; convert to PNG with scripts/svg2png.mjs.
+Frames are exact terminal renderings (same cells, same colours) exported as SVG; convert to PNG with
+`cd web && node e2e/svg2png.mjs ../demo/tui/*.svg`. Keys: Textual key names (up, down, tab, enter, escape, end, slash,
+space, 1, 2, ...) or `type:<text>`; one frame is saved after each key.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -20,6 +23,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from stampede.tui.app import StampedeTUI  # noqa: E402
 from stampede.tui.client import ApiClient  # noqa: E402
+
+
+def save(app: StampedeTUI, name: str, out: Path) -> None:
+    """Save one frame and give the SVG explicit width/height (from its viewBox) so converters clip the whole frame."""
+    app.save_screenshot(name, path=str(out))
+    p = out / name
+    s = p.read_text()
+    m = re.search(r'<svg([^>]*)viewBox="0 0 ([\d.]+) ([\d.]+)"', s)
+    if m and 'width="' not in m.group(1):
+        p.write_text(s.replace("<svg ", f'<svg width="{m.group(2)}" height="{m.group(3)}" ', 1))
 
 
 async def main() -> int:
@@ -43,7 +56,7 @@ async def main() -> int:
         await asyncio.sleep(a.wait)
         if not a.frames:
             await pilot.pause()
-        app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
+        save(app, f"{a.prefix}-{n:02d}.svg", out)
         n += 1
         for k in [k.strip() for k in a.keys.split(",") if k.strip()]:
             if k.startswith("type:"):
@@ -53,12 +66,12 @@ async def main() -> int:
                 await pilot.press(k)
             await asyncio.sleep(a.key_wait)
             await pilot.pause()
-            app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
+            save(app, f"{a.prefix}-{n:02d}.svg", out)
             n += 1
         for _ in range(a.frames):
             # timed frames: no pilot.pause() here, it would wait for an idle app and hide the streaming phase
             await asyncio.sleep(a.every)
-            app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
+            save(app, f"{a.prefix}-{n:02d}.svg", out)
             n += 1
     print(f"wrote {n} frames to {out}")
     return 0
