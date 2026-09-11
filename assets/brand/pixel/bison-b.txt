@@ -1,0 +1,6 @@
+source: assets/brand/pixel/raw-pixel-128.png
+cell_px: 16
+offset: [11, 15]
+grid: [112, 105]
+mixed_cells: 2808
+palette_cells: {'body': 3804, 'red': 870, 'light': 914, 'mid': 632, 'shadow': 241}

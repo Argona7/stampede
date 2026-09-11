@@ -45,7 +45,7 @@ Known: `uv sync` installs Textual 8.2.8, FastAPI, requests; `npm ci` pulls three
 
 ## Repository
 
-- [x] Local Git only, no remote (`git remote -v` empty). Latest commits: demo v5 with terminal intro, `stampede demo` / `export-demo`, README + docs/DEVELOPMENT.md, README media, mascot concept provenance.
+- [x] Local Git only, no remote (`git remote -v` empty). Latest commits: demo v5 with terminal intro, `stampede demo` / `export-demo`, README + docs/DEVELOPMENT.md, README media, mascot (pixel master, marks, hero), BRAND.md.
 - [d] Target GitHub account/repo and public visibility: owner decision. The brief does not authorise publication, a site, or posts.
 - [ ] Final check on the real GitHub page after publication (rendering, image sizes, anchors); the pre-publication check used the GitHub Markdown API + github-markdown-css in light/dark, desktop/narrow (`docs/acceptance/readme-*.png`).
 

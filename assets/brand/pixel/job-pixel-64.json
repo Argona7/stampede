@@ -1,0 +1,33 @@
+[
+  {
+    "created_at": "2026-09-11T15:54:27.563018Z",
+    "display_name": "GPT Image 2.5",
+    "id": "e2d6050f-9281-49c8-be7b-63f3b31d750a",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_155427_e2d6050f-9281-49c8-be7b-63f3b31d750a_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "background": "transparent",
+      "height": 2048,
+      "medias": [
+        {
+          "data": {
+            "id": "f9ba0718-65bf-4545-8684-7eeebb57e8b6",
+            "type": "media_input",
+            "url": "https://d2ol7oe51mr4n9.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/f9ba0718-65bf-4545-8684-7eeebb57e8b6.png"
+          },
+          "role": "image"
+        }
+      ],
+      "model": "flare",
+      "prompt": "Remake the attached bison mascot as pixel art. Keep exactly the same character and pose: one compact charging bison, three-quarter view, low center of gravity, powerful shoulder hump, short curved gray horns, one bold vermilion-red plane over the face and chest, matte near-black body with thin light-gray edge highlights, alert and determined. Render it as clean retro pixel art on a coarse grid of roughly 64 by 64 pixels: hard square pixels, no anti-aliasing, no gradients, no blur, no soft shading, every edge stepped. Use exactly four flat colors: near-black #0D0A0A for the body, vermilion red #FF3344 for the face-and-chest plane, light gray #A3A3A3 for horns, hooves and edge highlights, dark red-brown #351419 for shadow. Transparent background, the character centered and filling about 85 percent of the canvas. No text, no letters, no coin, no chart, no props, no outline glow.",
+      "quality": "xhigh",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_155427_e2d6050f-9281-49c8-be7b-63f3b31d750a.png",
+    "status": "completed"
+  }
+]

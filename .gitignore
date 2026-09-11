@@ -30,3 +30,5 @@ data/demo/*.part
 data/demo/*.sqlite
 # mascot exploration renders (2–3 MB each) stay out of history; the chosen master ships under assets/brand/ deliberately
 assets/brand/concepts/*.png
+assets/brand/pixel/raw-*.png
+assets/brand/pixel/sheet-raw.png

@@ -1,6 +1,12 @@
-<!-- hero: added when the mascot master is approved (docs/assets/hero.gif, static fallback docs/assets/hero-static.png) -->
+<p align="center">
+  <a href="docs/assets/hero-static.png"><img src="docs/assets/hero.gif" width="100%" alt="STAMPEDE — the red block wordmark, the tagline 'observed wallet rotations · Robinhood Chain · read-only', a red stroke pointing at the pixel-art bison mascot, which leans into one heavy step and settles back"></a>
+</p>
 
-# STAMPEDE
+<p align="center">
+  <img alt="tests: 48 passing" src="https://img.shields.io/badge/tests-48%20passing-FF3344?style=flat-square&labelColor=050505">
+  <img alt="python 3.13" src="https://img.shields.io/badge/python-3.13-A3A3A3?style=flat-square&labelColor=050505">
+  <img alt="chain 4663 (Robinhood Chain)" src="https://img.shields.io/badge/chain-4663-A3A3A3?style=flat-square&labelColor=050505">
+</p>
 
 **See what wallets sold before they bought the next coin.**
 
@@ -56,10 +62,14 @@ Keys are read from `.env` only and never printed.
 
 <img src="docs/assets/views.png" width="1280" alt="Four screenshots of the same replay session: TERMINAL (Textual UI with the feed of observed sequences, hot rotations and an activity sparkline), RADAR (ranked board of coins with score parts, inflow, sources and the alert journal), FLOW (ego network of one coin: where its wallets came from, where they went) and MAP (3D scene with the evidence card for one route)">
 
-- **TERMINAL** — `stampede terminal`: the stream of observed sequences as they happen on the replay clock, hot rotations, an activity sparkline, and a Radar screen (`Tab`). Every row is one wallet, one sell, one buy.
-- **RADAR** — coins ranked by what wallets are rotating *into* right now: inflow of distinct wallets per 10 minutes, acceleration, breadth of origins, wallet quality from the research backtest, age and curve stage. Presets `under radar`, `graduating`, `smart rotators`, `all`; every score part is shown next to the total ([`docs/RADAR.md`](docs/RADAR.md)).
-- **FLOW** — one coin in the centre, sources on the left, destinations on the right; ribbon width is the number of distinct wallets. Click a ribbon for the transactions.
-- **MAP** — the whole range as a graph: coins are nodes, observed rotations are directed edges; 3D with WebGL, 2D canvas fallback. Autopilot visits the strongest routes; `E` opens the evidence rows of the selected route.
+| The question | What STAMPEDE shows | Where |
+|---|---|---|
+| which coins are wallets rotating *into* right now? | distinct wallets per 10 minutes, acceleration, breadth of origins, wallet quality, age, curve stage — one score with every part visible | `RADAR` · terminal `Tab` |
+| where did the wallets of this coin come from, where did they go? | sources left, destinations right, ribbon width = distinct wallets, a click opens the transactions | `FLOW` · coin drawer `D` |
+| what does the whole hour look like? | coins as nodes, observed rotations as directed edges, pulses where sequences just landed, autopilot over the strongest routes | `MAP` · `A` |
+| show me the exact trades | wallet, sell tx, buy tx, gap, grade — with Blockscout links; distinct wallets and sequence rows counted separately | evidence `E` · terminal feed |
+
+TERMINAL — `stampede terminal`, the stream of observed sequences on the replay clock plus a Radar screen; RADAR, FLOW and MAP are the web views. Score parts, presets and context modules: [`docs/RADAR.md`](docs/RADAR.md).
 
 ## From an event to evidence
 

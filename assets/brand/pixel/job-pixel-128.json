@@ -1,0 +1,33 @@
+[
+  {
+    "created_at": "2026-09-11T15:54:27.720324Z",
+    "display_name": "GPT Image 2.5",
+    "id": "c8e0ce7f-3cce-417f-951c-1f46faf7f4a6",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_155427_c8e0ce7f-3cce-417f-951c-1f46faf7f4a6_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "background": "transparent",
+      "height": 2048,
+      "medias": [
+        {
+          "data": {
+            "id": "cc0d6d15-af7e-460e-8a99-3a03d33f9570",
+            "type": "media_input",
+            "url": "https://d2ol7oe51mr4n9.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/cc0d6d15-af7e-460e-8a99-3a03d33f9570.png"
+          },
+          "role": "image"
+        }
+      ],
+      "model": "flare",
+      "prompt": "Remake the attached bison mascot as detailed pixel art. Keep exactly the same character and pose: one compact charging bison, three-quarter view, low center of gravity, powerful shoulder hump, short curved gray horns, one bold vermilion-red plane over the face and chest, matte near-black body with thin light-gray edge highlights, alert and determined. Render it as crisp 16-bit style pixel art on a grid of roughly 128 by 128 pixels: hard square pixels, no anti-aliasing, no gradients, no blur, stepped edges, one-pixel highlights. Use exactly five flat colors: near-black #0D0A0A for the body, vermilion red #FF3344 for the face-and-chest plane, light gray #A3A3A3 for horns, hooves and edge highlights, mid gray #4A4A4A for secondary body facets, dark red-brown #351419 for shadow on the red plane. Transparent background, the character centered and filling about 85 percent of the canvas. No text, no letters, no coin, no chart, no props, no outline glow.",
+      "quality": "xhigh",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_155427_c8e0ce7f-3cce-417f-951c-1f46faf7f4a6.png",
+    "status": "completed"
+  }
+]
