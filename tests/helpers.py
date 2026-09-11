@@ -57,7 +57,10 @@ async def until(pred, timeout: float = 6.0, step: float = 0.05):
 
     t0 = time.time()
     while True:
-        v = pred()
+        try:
+            v = pred()
+        except Exception:  # noqa: BLE001 - widgets may not be mounted yet
+            v = None
         if v:
             return v
         if time.time() - t0 > timeout:

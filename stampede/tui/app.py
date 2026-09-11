@@ -16,6 +16,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import DataTable, Input, Sparkline, Static
 
 from . import brand
@@ -227,11 +228,20 @@ class StampedeTUI(App):
                 out["graph"] = self.client.graph(w, clock - span, clock, 1, 10)
             elif clock is None:
                 out["graph"] = {"edges": [], "nodes": [], "waiting": True}
-            self.call_from_thread(self.apply_update, out)
+            self._deliver(self.apply_update, out)
         except ApiError as e:
-            self.call_from_thread(self.apply_error, str(e))
+            self._deliver(self.apply_error, str(e))
         except Exception as e:  # noqa: BLE001
-            self.call_from_thread(self.apply_error, f"{type(e).__name__}: {e}")
+            self._deliver(self.apply_error, f"{type(e).__name__}: {e}")
+
+    def _deliver(self, fn, *args: Any) -> None:
+        """Hand a worker result to the UI thread; results that land after the app closed are dropped."""
+        if not self.is_running:
+            return
+        try:
+            self.call_from_thread(fn, *args)
+        except (NoMatches, RuntimeError):
+            pass
 
     def _is_seek(self, sess: dict[str, Any]) -> bool:
         """The clock moved further than playback could explain since the last poll."""
@@ -246,6 +256,12 @@ class StampedeTUI(App):
         return clock < self.last_clock - 1 or clock > expected_max
 
     def apply_update(self, out: dict[str, Any]) -> None:
+        try:
+            self._apply_update(out)
+        except NoMatches:
+            pass  # app is closing
+
+    def _apply_update(self, out: dict[str, Any]) -> None:
         self._pending_poll = False
         self.api_error = None
         self.error_count = 0
@@ -306,7 +322,10 @@ class StampedeTUI(App):
         self._pending_poll = False
         self.api_error = msg
         self.error_count += 1
-        self.render_status()
+        try:
+            self.render_status()
+        except NoMatches:
+            pass  # app is closing
 
     # ---- streaming a history load into the table (no clear, rows fly in over ~2.5 s) ----
     STREAM_S = 3.0  # cap: a history load flies in over up to this many seconds, whatever the tick rate
@@ -320,7 +339,13 @@ class StampedeTUI(App):
             self._stream_timer = self.set_interval(1 / 25, self._stream_tick)
 
     def _stream_tick(self) -> None:
-        table = self.query_one("#feed", DataTable)
+        try:
+            table = self.query_one("#feed", DataTable)
+        except NoMatches:  # app is closing: stop the timer quietly
+            if self._stream_timer is not None:
+                self._stream_timer.stop()
+                self._stream_timer = None
+            return
         if not self._stream_queue:
             if self._stream_timer is not None:
                 self._stream_timer.stop()
@@ -397,6 +422,12 @@ class StampedeTUI(App):
         self.query_one("#rule1", Static).update(Text("─" * max(10, w - 2), style=BORDER))
 
     def render_status(self) -> None:
+        try:
+            self._render_status()
+        except NoMatches:
+            pass  # periodic timer fired while the app is closing
+
+    def _render_status(self) -> None:
         s = self.session or {}
         st = self.status_doc or {}
         parts: list[Text] = []
@@ -587,9 +618,9 @@ class StampedeTUI(App):
         span = int(s.get("span_s") or 1800)
         try:
             doc = self.client.edge(a, b, w, (clock - span) if clock else None, clock, limit=40)
-            self.call_from_thread(self._edge_loaded, doc)
+            self._deliver(self._edge_loaded, doc)
         except ApiError as e:
-            self.call_from_thread(self.apply_error, str(e))
+            self._deliver(self.apply_error, str(e))
 
     def _edge_loaded(self, doc: dict[str, Any]) -> None:
         self.edge_doc = doc
@@ -652,9 +683,9 @@ class StampedeTUI(App):
     def _control(self, action: str, **kw: Any) -> None:
         try:
             sess = self.client.control(action, **kw)
-            self.call_from_thread(self._control_done, sess)
+            self._deliver(self._control_done, sess)
         except ApiError as e:
-            self.call_from_thread(self.notify, str(e), severity="warning")
+            self._deliver(lambda m: self.notify(m, severity="warning"), str(e))
 
     def _control_done(self, sess: dict[str, Any]) -> None:
         self.session = sess
