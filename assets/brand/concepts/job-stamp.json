@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-09-11T15:22:27.728932Z",
+    "display_name": "GPT Image 2.5",
+    "id": "3c5bbbde-8077-47ab-b99d-c62ef9783c3e",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_3c5bbbde-8077-47ab-b99d-c62ef9783c3e_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "height": 2048,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Design an original emblem mascot for STAMPEDE, a developer tool for exploring observed wallet activity. The same animal as a dense angular emblem: one compact bison in a charging pose, three-quarter view, low center of gravity, massive shoulder hump, short distinctive curved horns, cut into a few hard-edged geometric facets like a heavy printed stamp or a die-cut badge. Strictly flat two-tone graphic: matte near-black body (#0D0A0A) with one bold vermilion-red frontal plane over the face and chest (#FF3344), thin neutral matte-gray separation edges so the black form reads on a black background. Compact, self-contained shape that stays legible at 32 pixels. Alert and determined, not cute, not demonic. Isolated emblem, plain solid near-black background (#050505), no text, no letters, no circle frame, no coin, no dollar sign, no chart, no rocket, no flames, no gold, no clothing, no glasses, no armor, no crown, no weapon. Do not imitate an existing brand mascot. Prioritize a clean silhouette and consistent facets over texture.",
+      "quality": "xhigh",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_3c5bbbde-8077-47ab-b99d-c62ef9783c3e.png",
+    "status": "completed"
+  }
+]

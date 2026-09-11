@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-09-11T15:22:27.673463Z",
+    "display_name": "GPT Image 2.5",
+    "id": "bf573194-7892-4abc-856b-0dcad1210c1f",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_bf573194-7892-4abc-856b-0dcad1210c1f_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "height": 2048,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Design an original mascot for STAMPEDE, a developer tool for exploring observed wallet activity. One compact charging bison, three-quarter view, low center of gravity, powerful shoulder hump, short distinctive curved horns, strong readable silhouette. Premium graphic character design: a few large deliberate flat planes, restrained detail, sharp clean contour, matte near-black body (#0D0A0A), one bold vermilion-red frontal plane across the face and chest (#FF3344), subtle neutral matte-gray edge separation so the black body stays readable on a black background. Alert and determined, not cute, not demonic. A unique identity that remains recognizable at avatar size. Isolated character, plain solid near-black background (#050505), no text, no letters, no coin, no dollar sign, no chart, no rocket, no flames, no gold, no clothing, no glasses, no cybernetic armor, no crown, no weapon. Do not imitate an existing brand mascot. Prioritize anatomy, silhouette and consistent shape over decorative texture.",
+      "quality": "xhigh",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_bf573194-7892-4abc-856b-0dcad1210c1f.png",
+    "status": "completed"
+  }
+]

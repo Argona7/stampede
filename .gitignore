@@ -24,3 +24,9 @@ demo/v4/raw/*.webm
 demo/v4/out/*.mp4
 demo/v5/raw/*.webm
 demo/v5/out/*.mp4
+# demo bundle: data/demo/stampede-demo.sqlite.xz is built by `stampede export-demo` (17 MB) and unpacked to data/demo.sqlite;
+# whether the .xz ships inside the repo or as a release asset is an owner decision (docs/RELEASE-CHECKLIST.md)
+data/demo/*.part
+data/demo/*.sqlite
+# mascot exploration renders (2–3 MB each) stay out of history; the chosen master ships under assets/brand/ deliberately
+assets/brand/concepts/*.png

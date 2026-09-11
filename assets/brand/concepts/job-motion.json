@@ -1,0 +1,23 @@
+[
+  {
+    "created_at": "2026-09-11T15:22:27.619783Z",
+    "display_name": "GPT Image 2.5",
+    "id": "84df70f4-c39f-4488-a60f-0aaa504b51d5",
+    "job_type": "gpt_image_2_5",
+    "min_result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_84df70f4-c39f-4488-a60f-0aaa504b51d5_min.webp",
+    "params": {
+      "aspect_ratio": "1:1",
+      "height": 2048,
+      "medias": [],
+      "model": "flare",
+      "prompt": "Design an original mascot for STAMPEDE, a developer tool for exploring observed wallet activity. One compact bison character in a low running stance, three-quarter view, moving toward the center of the frame, low center of gravity, powerful shoulder hump, short distinctive curved horns, strong readable silhouette. Slightly volumetric premium design object: matte near-black soft-touch body (#0D0A0A) like an expensive collectible designer sculpture, simplified smooth forms, restrained detail, one bold vermilion-red frontal plane across the face and chest (#FF3344), soft neutral matte-gray rim light separating the body from the dark background. Alert and determined, not cute, not demonic, not a game monster, not a toy for children. Studio product lighting, isolated character, plain solid near-black background (#050505), no floor reflections, no text, no letters, no coin, no dollar sign, no chart, no rocket, no flames, no gold, no clothing, no glasses, no cybernetic armor, no crown, no weapon. Do not imitate an existing brand mascot. Prioritize anatomy, silhouette and consistent shape over decorative texture.",
+      "quality": "xhigh",
+      "reference_elements": [],
+      "remove_bg": false,
+      "resolution": "2k",
+      "width": 2048
+    },
+    "result_url": "https://d8j0ntlcm91z4.cloudfront.net/user_39CCgKGKJRb2LHnPpY0542MLG3o/hf_20260911_152227_84df70f4-c39f-4488-a60f-0aaa504b51d5.png",
+    "status": "completed"
+  }
+]

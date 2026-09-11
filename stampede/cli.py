@@ -56,6 +56,18 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default="web/public/fixture.json")
     p.add_argument("--window", default="30m")
 
+    p = sub.add_parser("export-demo", help="pack the recorded sample into data/demo/stampede-demo.sqlite.xz (the bundle `stampede demo` replays)")
+    p.add_argument("--src", default=None, help="source store (default: STAMPEDE_DB / data/stampede.sqlite)")
+    p.add_argument("--windows", default="1800", help="sequence windows to include, seconds, comma-separated")
+
+    p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8791)
+    p.add_argument("--window", default="30m")
+    p.add_argument("--speed", type=float, default=20.0)
+    p.add_argument("--refresh", action="store_true", help="re-unpack data/demo.sqlite from the bundle")
+    p.add_argument("--bundle-url", default=None, help="where to download data/demo/stampede-demo.sqlite.xz from if the checkout has no bundle (or set STAMPEDE_DEMO_URL)")
+
     args = ap.parse_args(argv)
 
     if args.cmd == "probe":
@@ -91,6 +103,14 @@ def main(argv: list[str] | None = None) -> int:
         from .api.fixture import main_export
 
         return main_export(args)
+    if args.cmd == "export-demo":
+        from .demo import main_export as main_export_demo
+
+        return main_export_demo(args)
+    if args.cmd == "demo":
+        from .demo import main_demo
+
+        return main_demo(args)
     if args.cmd == "terminal":
         from .tui.app import main_terminal
 
