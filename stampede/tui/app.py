@@ -68,6 +68,9 @@ class StampedeTUI(App):
     #feedwrap {{ width: 3fr; }}
     #feedhead {{ height: 1; color: {SECONDARY}; padding: 0 1; }}
     #feed {{ height: 1fr; background: {BG}; }}
+    #radar {{ height: 1fr; background: {BG}; display: none; }}
+    #radar.visible {{ display: block; }}
+    #feed.hidden {{ display: none; }}
     #empty {{ height: auto; color: {SECONDARY}; padding: 1 2; display: none; }}
     #empty.visible {{ display: block; }}
     #detail {{ width: 2fr; padding: 0 1; border-left: solid {BORDER}; }}
@@ -97,6 +100,12 @@ class StampedeTUI(App):
         Binding("bracketleft", "speed(-1)", "slower"),
         Binding("bracketright", "speed(1)", "faster"),
         Binding("end,f", "follow", "follow tail"),
+        Binding("tab", "toggle_screen", "feed/radar", priority=True),
+        Binding("u", "preset('under_radar')", "under radar"),
+        Binding("g", "preset('graduating')", "graduating"),
+        Binding("s", "preset('smart_rotators')", "smart rotators"),
+        Binding("a", "preset('all')", "all"),
+        Binding("r", "refresh_coin", "refresh context"),
     ]
 
     def __init__(self, client: ApiClient, poll_s: float = 2.0, **kw: Any):
@@ -126,6 +135,12 @@ class StampedeTUI(App):
         self._pending_poll = False
         self._sym_w = 16
         self._columns_narrow: bool | None = None
+        self.screen_mode = "feed"  # feed | radar
+        self.radar_preset = "under_radar"
+        self.radar_doc: dict[str, Any] | None = None
+        self.radar_rows: list[dict[str, Any]] = []
+        self.coin_doc: dict[str, Any] | None = None
+        self.coin_addr: str | None = None
         self._stream_queue: list[dict[str, Any]] = []  # history rows still to be added (streamed in over STREAM_S)
         self._stream_total = 0
         self._stream_done = 0
@@ -144,6 +159,7 @@ class StampedeTUI(App):
                 yield Input(placeholder="filter by symbol or address, Esc to clear", id="search")
                 yield Static(id="empty")
                 yield DataTable(id="feed", cursor_type="row", zebra_stripes=False, show_row_labels=False)
+                yield DataTable(id="radar", cursor_type="row", zebra_stripes=False, show_row_labels=False)
             yield VerticalScroll(Static(id="detailbody"), id="detail")
         with Horizontal(id="bottom"):
             yield Static(id="hot")
@@ -156,6 +172,10 @@ class StampedeTUI(App):
     def on_mount(self) -> None:
         table = self.query_one("#feed", DataTable)
         self._setup_columns(table)
+        rt = self.query_one("#radar", DataTable)
+        for name, key, w in (("#", "rank", 3), ("SCORE", "score", 5), ("COIN", "coin", 16), ("IN 10M", "inflow", 6), ("ACC", "acc", 6), ("SRC", "src", 4), ("AGE", "age", 8), ("STAGE", "stage", 10), ("5M", "chg5", 7), ("1H", "chg1h", 8), ("X 1H", "x", 5), ("FROM", "from", 40)):
+            rt.add_column(name, key=key, width=w)
+        self.set_interval(5.0, self.radar_tick)
         self.query_one("#search", Input).can_focus = False
         table.focus()
         self.render_brand()
@@ -313,7 +333,7 @@ class StampedeTUI(App):
         self.render_status()
         self.render_feedhead()
         self.render_activity()
-        self.query_one("#empty", Static).set_class(table.row_count == 0, "visible")
+        self.query_one("#empty", Static).set_class(table.row_count == 0 and self.screen_mode == "feed", "visible")
         self.query_one("#empty", Static).update(Text("NO OBSERVED SEQUENCES IN THE VISIBLE RANGE. Widen the range or wait for the clock.", style=SECONDARY) if table.row_count == 0 else "")
         if self.detail_mode == "summary":
             self.render_detail()
@@ -370,6 +390,161 @@ class StampedeTUI(App):
         self.render_feedhead()
         if n and self._stream_done % 400 < n:
             self.render_activity(streaming=True)
+
+    # ---- radar screen ----
+    def radar_tick(self) -> None:
+        if self.screen_mode == "radar":
+            self.fetch_radar()
+
+    @work(thread=True, exclusive=True, group="radar")
+    def fetch_radar(self) -> None:
+        try:
+            doc = self.client.radar({"preset": self.radar_preset, "limit": 40})
+            self._deliver(self._radar_loaded, doc)
+        except ApiError as e:
+            self._deliver(self.apply_error, str(e))
+
+    def _radar_loaded(self, doc: dict[str, Any]) -> None:
+        self.radar_doc = doc
+        rows = doc.get("rows", [])
+        table = self.query_one("#radar", DataTable)
+        # keep the cursor on the same coin across refreshes
+        cur = self._selected_radar_row()
+        cur_addr = cur["address"] if cur else None
+        prev = {r["address"]: r["inflow_10m"] for r in self.radar_rows}
+        table.clear()
+        self.radar_rows = rows
+        for i, r in enumerate(rows, 1):
+            bump = r["inflow_10m"] > prev.get(r["address"], r["inflow_10m"])
+            age = dur(r["age_s"]) if r.get("age_s") is not None else "?"
+            stage = f"curve {int(r['progress'] * 100)}%" if r["stage"] == "curve" and r.get("progress") is not None else r["stage"]
+            chg5 = f"{r['chg_5m']:+.0f}%" if r.get("chg_5m") is not None else "—"
+            chg1 = f"{r['chg_1h']:+.0f}%" if r.get("chg_1h") is not None else "—"
+            x = "n/a" if r.get("mentions_1h") is None else str(r["mentions_1h"])
+            src = "  ".join(f"{s['symbol'][:12]}·{s['wallets']}" for s in r["sources"][:3])
+            table.add_row(
+                Text(str(i), style=MUTED),
+                Text(f"{r['score']:.0f}", style=f"bold {TEXT}"),
+                Text(r["symbol"][:16], style=f"bold {TEXT}"),
+                Text(str(r["inflow_10m"]), style=f"bold {PRIMARY}" if bump else TEXT),
+                Text(f"×{r['accel']:.1f}", style=SECONDARY),
+                Text(str(r["breadth"]), style=SECONDARY),
+                Text(age, style=SECONDARY),
+                Text(stage, style=SECONDARY),
+                Text(chg5, style=TEXT if (r.get("chg_5m") or 0) >= 0 else SECONDARY),
+                Text(chg1, style=SECONDARY),
+                Text(x, style=SECONDARY),
+                Text(src, style=SECONDARY),
+                key=r["address"],
+            )
+        if rows:
+            idx = next((i for i, r in enumerate(rows) if r["address"] == cur_addr), 0)
+            table.move_cursor(row=idx, scroll=False)
+        self.render_feedhead()
+
+    def _selected_radar_row(self) -> dict[str, Any] | None:
+        table = self.query_one("#radar", DataTable)
+        if table.row_count == 0:
+            return None
+        try:
+            row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+            return next((r for r in self.radar_rows if r["address"] == row_key.value), None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def action_toggle_screen(self) -> None:
+        self.screen_mode = "radar" if self.screen_mode == "feed" else "feed"
+        feed = self.query_one("#feed", DataTable)
+        rt = self.query_one("#radar", DataTable)
+        feed.set_class(self.screen_mode == "radar", "hidden")
+        rt.set_class(self.screen_mode == "radar", "visible")
+        (rt if self.screen_mode == "radar" else feed).focus()
+        if self.screen_mode == "radar":
+            self.fetch_radar()
+        self.render_feedhead()
+        self.render_keys()
+
+    def action_preset(self, name: str) -> None:
+        if self.query_one("#search", Input).has_focus:
+            return
+        self.radar_preset = name
+        if self.screen_mode != "radar":
+            self.action_toggle_screen()
+        else:
+            self.fetch_radar()
+
+    def action_refresh_coin(self) -> None:
+        if self.coin_addr:
+            self.load_coin(self.coin_addr, True)
+
+    @work(thread=True, exclusive=True, group="coin")
+    def load_coin(self, addr: str, refresh: bool = False) -> None:
+        try:
+            doc = self.client.coin(addr, refresh)
+            self._deliver(self._coin_loaded, doc)
+        except ApiError as e:
+            self._deliver(self.apply_error, str(e))
+
+    def _coin_loaded(self, doc: dict[str, Any]) -> None:
+        self.coin_doc = doc
+        self.detail_mode = "coin"
+        self.render_detail()
+
+    def render_coin(self, t: Text) -> None:
+        c = self.coin_doc or {}
+        t.append(f"{c.get('symbol', '?')}\n", style=f"bold {TEXT}")
+        t.append(f"{c.get('name', '')} · {c.get('short', '')}\n\n", style=SECONDARY)
+        prog = c.get("progress") or {}
+        aso = c.get("as_of") or {}
+        la = c.get("launch") or {}
+        stage = prog.get("stage", "?")
+        if stage == "curve" and prog.get("progress") is not None:
+            stage += f" · {int(prog['progress'] * 100)}% to graduation"
+        t.append(f"age {dur(c['age_s']) if c.get('age_s') is not None else '?'} · {stage}\n", style=TEXT)
+        if la:
+            t.append(f"launched {utc(la.get('ts'))} UTC · deployer {short(la.get('deployer', ''))}\n", style=SECONDARY)
+        c5 = aso.get("chg_5m")
+        c1 = aso.get("chg_1h")
+        t.append(f"price 5m {c5:+.1f}% · 1h {c1:+.1f}%\n" if c5 is not None and c1 is not None else "price change: n/a\n", style=TEXT)
+        t.append(f"trades 1h {aso.get('trades_1h', 0)} · buyers 1h {aso.get('buyers_1h', 0)} · volume 1h {aso.get('vol_1h_quote', 0):,.0f} {aso.get('quote_symbol') or ''}\n", style=SECONDARY)
+        t.append(f"buyers in range {c.get('buyers', 0)} · new {c.get('new_buyers', 0)}\n\n", style=SECONDARY)
+        inb = [e for e in c.get("inbound", []) if e["wallets_main"] > 0][:6]
+        outb = [e for e in c.get("outbound", []) if e["wallets_main"] > 0][:6]
+        t.append("WALLETS CAME FROM\n", style=SECONDARY)
+        for e in inb:
+            t.append(f"  {e['wallets_main']:>4}  {e['token']['symbol']}\n", style=TEXT)
+        if not inb:
+            t.append("  none in range\n", style=MUTED)
+        t.append("THEN WENT TO\n", style=SECONDARY)
+        for e in outb:
+            t.append(f"  {e['wallets_main']:>4}  {e['token']['symbol']}\n", style=TEXT)
+        if not outb:
+            t.append("  none in range\n", style=MUTED)
+        h = c.get("holders") or {}
+        t.append("\nHOLDERS\n", style=SECONDARY)
+        if h and "holders" in h:
+            dev = f"{h['dev_share'] * 100:.2f}%" if h.get("dev_share") is not None else "?"
+            t.append(f"  {h['holders']} holders · top-10 {h.get('top10_share', 0) * 100:.1f}% · dev holds {dev} · sold {h.get('dev_sold_share', 0) * 100:.1f}% · launch-block buyers {h.get('launch_block_buyers', 0)}\n", style=TEXT)
+        else:
+            t.append("  not fetched · r = refresh context\n", style=MUTED)
+        m = c.get("mentions") or {}
+        t.append("X MENTIONS\n", style=SECONDARY)
+        if m:
+            t.append(f"  1h {m.get('mentions_1h')} · 24h {m.get('mentions_24h')} · authors {m.get('distinct_authors')}\n", style=TEXT)
+            for tw in (m.get("top") or [])[:2]:
+                t.append(f"  @{tw.get('author')} ({tw.get('followers') or 0:,} followers) {tw.get('text', '')[:70]}\n", style=SECONDARY)
+        else:
+            t.append("  not fetched · r = refresh context\n", style=MUTED)
+        so = c.get("socials") or {}
+        if so:
+            t.append("DECLARED AT LAUNCH\n", style=SECONDARY)
+            t.append(f"  X @{so.get('twitter') or '—'} · tg {so.get('telegram') or '—'} · {so.get('website') or '—'}\n", style=TEXT)
+        mk = c.get("market_now") or c.get("market_cached") or {}
+        if mk and mk.get("found"):
+            t.append("MARKET NOW (GeckoTerminal)\n", style=SECONDARY)
+            t.append(f"  FDV ${mk.get('fdv_usd') or 0:,.0f} · liq ${mk.get('reserve_usd') or 0:,.0f} · vol 1h ${mk.get('vol_h1') or 0:,.0f} · 1h {mk.get('chg_h1') or 0:+.1f}%\n", style=TEXT)
+        t.append(f"\n{c.get('note', '')}\n", style=MUTED)
+        t.append("Esc back · r refresh context · Tab feed/radar", style=MUTED)
 
     # ---- rows ----
     def _row_cells(self, e: dict[str, Any]) -> list[Text]:
@@ -475,6 +650,15 @@ class StampedeTUI(App):
         span = dur(s.get("span_s") or 1800)
         flt = f" · FILTER '{self.filter_text}'" if self.filter_text else ""
         fresh = f" · +{len(self.fresh_ids)} new" if self.fresh_ids else ""
+        if self.screen_mode == "radar":
+            d = self.radar_doc or {}
+            pr = (d.get("presets") or {}).get(self.radar_preset, {})
+            ctx = d.get("context") or {}
+            head = Text(f"RADAR · {self.radar_preset.replace('_', ' ').upper()} · {d.get('total', 0)} coins with rotation inflow · last {span} · ", style=f"bold {TEXT}")
+            head.append(pr.get("label", ""), style=SECONDARY)
+            head.append(f" · context {'on' if ctx.get('enabled') else 'off (replay: as-of on-chain only)'}", style=MUTED)
+            self.query_one("#feedhead", Static).update(head)
+            return
         if self._stream_queue:
             head = Text(f"STREAMING {shown:,} / {n:,} OBSERVED SEQUENCES · last {span}", style=f"bold {TEXT}")
             head.append(f" · {'█' * min(40, int(40 * shown / max(1, n)))}{'·' * (40 - min(40, int(40 * shown / max(1, n))))}", style=PRIMARY)
@@ -485,6 +669,10 @@ class StampedeTUI(App):
     def render_detail(self) -> None:
         body = self.query_one("#detailbody", Static)
         t = Text()
+        if self.detail_mode == "coin" and self.coin_doc:
+            self.render_coin(t)
+            body.update(t)
+            return
         if self.detail_mode == "evidence" and self.edge_doc:
             d = self.edge_doc
             fs, ts_ = d["from"], d["to"]
@@ -577,7 +765,10 @@ class StampedeTUI(App):
     def render_keys(self) -> None:
         s = self.session or {}
         ctl = " · space play/pause · ←/→ seek 60s · [ ] speed" if s.get("controls") else ""
-        self.query_one("#keys", Static).update(Text(f"↑/↓ select · Enter open · Esc back · / search · End follow tail{ctl} · q quit", style=SECONDARY))
+        if self.screen_mode == "radar":
+            self.query_one("#keys", Static).update(Text(f"RADAR · Tab feed · ↑/↓ select · Enter coin card · r refresh context · presets: u under radar · g graduating · s smart rotators · a all{ctl} · q quit", style=SECONDARY))
+            return
+        self.query_one("#keys", Static).update(Text(f"↑/↓ select · Enter open · Esc back · / search · End follow tail · Tab radar{ctl} · q quit", style=SECONDARY))
 
     # ---- selection / actions ----
     def _selected_event(self) -> dict[str, Any] | None:
@@ -600,6 +791,13 @@ class StampedeTUI(App):
         if self.query_one("#search", Input).has_focus:
             self.query_one("#search", Input).blur()
             self.query_one("#feed", DataTable).focus()
+            return
+        if self.screen_mode == "radar":
+            r = self._selected_radar_row()
+            if r:
+                self.coin_addr = r["address"]
+                self.query_one("#detailbody", Static).update(Text(f"{r['symbol']}\nloading coin…", style=SECONDARY))
+                self.load_coin(r["address"])
             return
         row = self._selected_event()
         if not row:
@@ -639,6 +837,7 @@ class StampedeTUI(App):
             return
         self.detail_mode = "summary"
         self.edge_doc = None
+        self.coin_doc = None
         self.render_detail()
 
     def action_search(self) -> None:

@@ -56,3 +56,12 @@ class ApiClient:
 
     def edge(self, a: str, b: str, window_s: int, from_ts: int | None, to_ts: int | None, limit: int = 40) -> dict[str, Any]:
         return self._get(f"/api/edge/{a}/{b}", {"window": f"{window_s}s", "from": from_ts, "to": to_ts, "limit": limit, "exact": 1})
+
+    def radar(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._get("/api/radar", params)
+
+    def coin(self, addr: str, refresh: bool = False) -> dict[str, Any]:
+        return self._get(f"/api/coin/{addr}", {"refresh": 1 if refresh else 0})
+
+    def alerts(self) -> dict[str, Any]:
+        return self._get("/api/alerts")

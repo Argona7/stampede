@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './client'
 import Caption from './components/Caption'
+import CoinDrawer from './components/CoinDrawer'
+import Flow from './components/Flow'
+import Radar from './components/Radar'
+import { DEFAULT_RADAR, type RadarFilters } from './radarFilters'
 import Controls, { type Filters } from './components/Controls'
 import Details, { SequenceRow } from './components/Details'
 import Tape, { type TapeApi } from './components/Tape'
@@ -10,7 +14,7 @@ import TopStrip from './components/TopStrip'
 import Scene3D, { type PerfStats, type Pulse, type ViewState } from './scene/Scene3D'
 import { sessionApi } from './session'
 import { utc, windowName } from './format'
-import type { EdgeDetail, Graph, Recent, Selection, SeqEvent, SessionState, Status, TokenDetail } from './types'
+import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Recent, Selection, SeqEvent, SessionState, Status, TokenDetail } from './types'
 
 const SESSION_POLL_MS = 1000
 const EVENTS_POLL_MS = 1500
@@ -48,6 +52,21 @@ export default function App() {
   const lastClockRef = useRef<{ clock: number; wall: number; id: string } | null>(null)
   const inFlight = useRef(false)
   const showPerf = params.get('perf') === '1'
+  // ---- radar / flow / coin ----
+  const initialView = (params.get('view') as 'radar' | 'flow' | 'map' | null) ?? 'radar'
+  const [view, setView] = useState<'radar' | 'flow' | 'map'>(initialView === 'flow' || initialView === 'map' ? initialView : 'radar')
+  const [radarFilters, setRadarFilters] = useState<RadarFilters>(DEFAULT_RADAR)
+  const [radarData, setRadarData] = useState<RadarResponse | null>(null)
+  const [alerts, setAlerts] = useState<AlertsResponse | null>(null)
+  const [coinAddr, setCoinAddr] = useState<string | null>(params.get('coin'))
+  const [coin, setCoin] = useState<CoinDetail | null>(null)
+  const [coinLoading, setCoinLoading] = useState(false)
+  const [coinError, setCoinError] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [freshTokens, setFreshTokens] = useState<Map<string, number>>(new Map())
+  const [freshEdges, setFreshEdges] = useState<Map<string, number>>(new Map())
+  const prevInflow = useRef<Map<string, number>>(new Map())
+  const coinNonce = useRef(0)
 
   const mode = session?.mode ?? status?.mode ?? 'fixture'
 
@@ -165,6 +184,7 @@ export default function App() {
           for (const r of rows) perEdge.set(`${r.from}->${r.to}`, (perEdge.get(`${r.from}->${r.to}`) ?? 0) + 1)
           const at = performance.now()
           setPulses([...perEdge.entries()].map(([key, count]) => ({ key, count, at })))
+          setFreshEdges((m) => new Map([...m, ...[...perEdge.keys()].map((k) => [k, at] as [string, number])]))
           window.setTimeout(() => alive && setFreshRows(new Set()), 2500)
         }
       } catch {
@@ -179,6 +199,71 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.rev, session?.clock_ts, session?.playing, mode, liveLastTs])
+
+  // ---- radar (ranked coins) and alerts: poll while the radar or flow view is visible ----
+  const radarClock = session?.clock_ts ?? null
+  const radarTick = radarClock === null ? 0 : Math.floor(radarClock / 30)
+  const coinTick = radarClock === null ? 0 : Math.floor(radarClock / 60)
+  useEffect(() => {
+    if (view === 'map') return
+    let alive = true
+    const tick = () => {
+      const f = radarFilters
+      api
+        .radar({ preset: f.preset !== 'custom' ? f.preset : null, min_wallets: f.minWallets, age_max: f.ageMax, stage: f.stage, exclude_bots: f.excludeBots ? 1 : 0, mentions_max: f.mentionsMax, quality_min: f.qualityMin, sort: f.sort, limit: 60 })
+        .then((d) => {
+          if (!alive) return
+          const bumps = new Map<string, number>()
+          const now = performance.now()
+          for (const r of d.rows) {
+            const prev = prevInflow.current.get(r.address)
+            if (prev !== undefined && r.inflow_10m > prev) bumps.set(r.address, now)
+            prevInflow.current.set(r.address, r.inflow_10m)
+          }
+          if (bumps.size) setFreshTokens((m) => new Map([...m, ...bumps]))
+          setRadarData(d)
+        })
+        .catch(() => {})
+      api.alerts().then((a) => alive && setAlerts(a)).catch(() => {})
+    }
+    tick()
+    const id = window.setInterval(tick, 4000)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [view, radarFilters, radarTick])
+
+  // ---- one coin: on-chain as-of numbers plus whatever context is cached; refresh fetches live context ----
+  const loadCoin = useCallback((addr: string, refresh = false) => {
+    const n = ++coinNonce.current
+    setCoinLoading(true)
+    setCoinError(null)
+    api
+      .coin(addr, refresh)
+      .then((c) => {
+        if (coinNonce.current !== n) return
+        setCoin(c)
+      })
+      .catch((e) => coinNonce.current === n && setCoinError(String(e.message ?? e)))
+      .finally(() => coinNonce.current === n && setCoinLoading(false))
+  }, [])
+  useEffect(() => {
+    if (!coinAddr) {
+      setCoin(null)
+      return
+    }
+    loadCoin(coinAddr)
+  }, [coinAddr, loadCoin, coinTick])
+
+  const openCoin = useCallback((addr: string) => {
+    setCoinAddr(addr)
+    setDrawerOpen(true)
+  }, [])
+  const openFlow = useCallback((addr: string) => {
+    setCoinAddr(addr)
+    setView('flow')
+  }, [])
 
   // ---- details for the selection ----
   useEffect(() => {
@@ -217,17 +302,25 @@ export default function App() {
   // automation hook (demo recording, tests): same code path as a click
   useEffect(() => {
     ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
-    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing })
-  }, [select, viewState, selection, layout, renderer, graph, session])
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, coin: coinAddr, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing })
+    ;(window as unknown as { __stampede_view?: (v: 'radar' | 'flow' | 'map') => void }).__stampede_view = setView
+    ;(window as unknown as { __stampede_coin?: (a: string) => void }).__stampede_coin = openFlow
+  }, [select, viewState, selection, layout, renderer, graph, session, view, coinAddr, radarData, openFlow])
 
   // keys: E evidence, Esc back, P presentation, space play/pause
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return
-      if (e.key === 'Escape') select(null)
+      if (e.key === 'Escape') {
+        if (drawerOpen) setDrawerOpen(false)
+        else select(null)
+      } else if (e.key === '1') setView('radar')
+      else if (e.key === '2') setView('flow')
+      else if (e.key === '3') setView('map')
       else if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
       else if (e.key === 'p' || e.key === 'P') setLayout((l) => (l === 'presentation' ? 'explore' : 'presentation'))
       else if (e.key === 't' || e.key === 'T') setShowTape((v) => !v)
+      else if ((e.key === 'd' || e.key === 'D') && coinAddr) setDrawerOpen((v) => !v)
       else if (e.key === ' ' && session?.controls) {
         e.preventDefault()
         control('toggle')
@@ -235,7 +328,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [select, control, session?.controls])
+  }, [select, control, session?.controls, drawerOpen, coinAddr])
 
   const recent: Recent[] = useMemo(
     () =>
@@ -257,9 +350,28 @@ export default function App() {
   const presentation = layout === 'presentation'
   const stale = status?.connection === 'stale'
 
+  const mapView = view === 'map'
   return (
-    <div className={`app ${presentation ? 'presentation' : ''}`}>
-      <TopStrip status={status} session={session} statusError={statusError} layout={layout} renderer={renderer} edgesShown={edgesShown} edgesTotal={edgesTotal} onLayout={setLayout} onRenderer={setRenderer} onControl={control} onSelect={select} />
+    <div className={`app ${presentation || !mapView ? 'presentation' : ''} view-${view}`}>
+      <TopStrip status={status} session={session} statusError={statusError} layout={layout} renderer={renderer} edgesShown={edgesShown} edgesTotal={edgesTotal} onLayout={setLayout} onRenderer={setRenderer} onControl={control} onSelect={(s) => (s?.kind === 'token' ? openCoin(s.address) : select(s))} view={view} onView={setView} />
+      {view === 'radar' && (
+        <main className="main radar-main">
+          <Radar data={radarData} alerts={alerts} session={session} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} onSelect={openCoin} onFlow={openFlow} freshTokens={freshTokens} />
+          {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={openCoin} />}
+        </main>
+      )}
+      {view === 'flow' && (
+        <main className="main flow-main">
+          <Flow coin={coin} loading={coinLoading} onFocus={(a) => setCoinAddr(a)} onEdge={(s) => { select(s); setView('map'); setLayout('presentation') }} fresh={freshEdges} windowS={session?.window_s ?? 1800} />
+          {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={(a) => setCoinAddr(a)} />}
+          {!drawerOpen && coin && (
+            <button className="drawer-toggle" onClick={() => setDrawerOpen(true)}>
+              Coin details (D)
+            </button>
+          )}
+        </main>
+      )}
+      {view === 'map' && (
       <main className="main">
         {!presentation && <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} session={session} onControl={control} />}
         <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''} ${presentation && showTape && !evidenceOpen ? 'has-tape' : ''}`} aria-label="Rotation map">
@@ -333,7 +445,8 @@ export default function App() {
         </section>
         {!presentation && <Details selection={selection} edge={edge} token={token} loading={detailLoading} error={detailError} onSelect={select} freshRows={freshRows} />}
       </main>
-      {!presentation && <Ticker status={status} session={session} recent={recent} freshKeys={freshRows} onSelect={select} />}
+      )}
+      {view === 'map' && !presentation && <Ticker status={status} session={session} recent={recent} freshKeys={freshRows} onSelect={select} />}
     </div>
   )
 }

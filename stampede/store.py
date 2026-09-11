@@ -49,6 +49,28 @@ CREATE TABLE IF NOT EXISTS wallets (address TEXT PRIMARY KEY, is_contract INTEGE
 CREATE TABLE IF NOT EXISTS quotes (address TEXT PRIMARY KEY, symbol TEXT, decimals INTEGER);
 CREATE TABLE IF NOT EXISTS rejected_tokens (address TEXT PRIMARY KEY, checked_at REAL);
 CREATE TABLE IF NOT EXISTS reports (name TEXT PRIMARY KEY, created REAL, body TEXT);
+-- PONS lifecycle (from TokenLaunched / CurveCompleted / PoolRegistered logs, or fetched on demand)
+CREATE TABLE IF NOT EXISTS launches (
+  token TEXT PRIMARY KEY, curve TEXT, deployer TEXT, pair_token TEXT, threshold TEXT, launch_config INTEGER,
+  block INTEGER, ts INTEGER, tx_hash TEXT, source TEXT);
+CREATE TABLE IF NOT EXISTS graduations (
+  token TEXT PRIMARY KEY, stage TEXT, block INTEGER, ts INTEGER, tx_hash TEXT, quote_token TEXT, creator TEXT);
+CREATE TABLE IF NOT EXISTS launch_meta (
+  token TEXT PRIMARY KEY, twitter TEXT, telegram TEXT, website TEXT, description TEXT, strings TEXT, fetched_at REAL);
+-- external context caches (json blobs with fetch time; never mixed with on-chain facts)
+CREATE TABLE IF NOT EXISTS market_cache (token TEXT PRIMARY KEY, fetched_at REAL, body TEXT);
+CREATE TABLE IF NOT EXISTS x_cache (key TEXT PRIMARY KEY, fetched_at REAL, body TEXT);
+CREATE TABLE IF NOT EXISTS holders_cache (token TEXT PRIMARY KEY, fetched_at REAL, as_of_block INTEGER, body TEXT);
+CREATE TABLE IF NOT EXISTS api_budget (name TEXT PRIMARY KEY, calls INTEGER, day TEXT);
+-- wallet quality from the research backtest (walk-forward), plus bot flags
+CREATE TABLE IF NOT EXISTS wallet_scores (
+  wallet TEXT PRIMARY KEY, rotations INTEGER, runner_hits INTEGER, score REAL, is_bot INTEGER, trades_per_hour REAL, updated_at REAL);
+-- alerts with outcomes filled in later
+CREATE TABLE IF NOT EXISTS alerts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_ts INTEGER, clock_ts INTEGER, mode TEXT, token TEXT, symbol TEXT, rule TEXT,
+  score REAL, inflow INTEGER, mentions_1h INTEGER, price REAL, detail TEXT,
+  outcome_30m REAL, outcome_60m REAL, graduated_after INTEGER, outcome_checked_ts INTEGER);
+CREATE INDEX IF NOT EXISTS alerts_token ON alerts(token, created_ts);
 """
 
 

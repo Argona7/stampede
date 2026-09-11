@@ -1,4 +1,4 @@
-import type { EdgeDetail, Graph, Status, TokenDetail, TokenLabel } from './types'
+import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Status, TokenDetail, TokenLabel } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -21,4 +21,7 @@ export const api = {
   token: (addr: string, window_s: number, from: number | null, to: number | null) =>
     get<TokenDetail>(`/api/token/${addr}?${q({ window: `${window_s}s`, from, to })}`),
   search: (text: string) => get<TokenLabel[]>(`/api/search?${q({ q: text })}`),
+  radar: (p: Record<string, string | number | null | undefined>) => get<RadarResponse>(`/api/radar?${q(p)}`),
+  coin: (addr: string, refresh = false) => get<CoinDetail>(`/api/coin/${addr}?${q({ refresh: refresh ? 1 : 0 })}`),
+  alerts: () => get<AlertsResponse>('/api/alerts'),
 }

@@ -15,9 +15,11 @@ interface Props {
   onRenderer: (r: '3d' | '2d') => void
   onControl: (action: string, extra?: Record<string, number | undefined>) => void
   onSelect: (s: Selection) => void
+  view: 'radar' | 'flow' | 'map'
+  onView: (v: 'radar' | 'flow' | 'map') => void
 }
 
-export default function TopStrip({ status, session, statusError, layout, renderer, edgesShown, edgesTotal, onLayout, onRenderer, onControl, onSelect }: Props) {
+export default function TopStrip({ status, session, statusError, layout, renderer, edgesShown, edgesTotal, onLayout, onRenderer, onControl, onSelect, view, onView }: Props) {
   const [text, setText] = useState('')
   const [hits, setHits] = useState<TokenLabel[]>([])
   const [open, setOpen] = useState(false)
@@ -55,6 +57,13 @@ export default function TopStrip({ status, session, statusError, layout, rendere
         STAMPEDE
         <small>wallet rotations · Robinhood Chain</small>
       </div>
+      <nav className="views" aria-label="Views">
+        {(['radar', 'flow', 'map'] as const).map((v, i) => (
+          <button key={v} className={view === v ? 'on' : ''} onClick={() => onView(v)} data-testid={`view-${v}`}>
+            {i + 1} {v.toUpperCase()}
+          </button>
+        ))}
+      </nav>
       <div className="mid">
         {errorText ? <span className="alert">{errorText}</span> : <span className={`badge ${badgeClass}`}>{badgeText}</span>}
         <span>
@@ -67,9 +76,11 @@ export default function TopStrip({ status, session, statusError, layout, rendere
         <span>
           WINDOW <b>{windowName(session?.window_s ?? 1800)}</b>
         </span>
-        <span>
-          SHOWING <b>{edgesShown}</b> OF <b>{edgesTotal}</b> EDGES
-        </span>
+        {view === 'map' && (
+          <span>
+            SHOWING <b>{edgesShown}</b> OF <b>{edgesTotal}</b> EDGES
+          </span>
+        )}
         {session?.id && <span className="faint">SESSION {session.id}</span>}
         <div className="search">
           <input
@@ -121,12 +132,16 @@ export default function TopStrip({ status, session, statusError, layout, rendere
             </button>
           </>
         )}
-        <button className={renderer === '3d' ? 'on' : ''} onClick={() => onRenderer(renderer === '3d' ? '2d' : '3d')} aria-label="Toggle renderer">
-          {renderer === '3d' ? '3D' : '2D'}
-        </button>
-        <button className={layout === 'presentation' ? 'on' : ''} onClick={() => onLayout(layout === 'presentation' ? 'explore' : 'presentation')} aria-label="Toggle presentation layout" data-testid="layout-toggle">
-          {layout === 'presentation' ? 'Explore (P)' : 'Present (P)'}
-        </button>
+        {view === 'map' && (
+          <>
+            <button className={renderer === '3d' ? 'on' : ''} onClick={() => onRenderer(renderer === '3d' ? '2d' : '3d')} aria-label="Toggle renderer">
+              {renderer === '3d' ? '3D' : '2D'}
+            </button>
+            <button className={layout === 'presentation' ? 'on' : ''} onClick={() => onLayout(layout === 'presentation' ? 'explore' : 'presentation')} aria-label="Toggle presentation layout" data-testid="layout-toggle">
+              {layout === 'presentation' ? 'Explore (P)' : 'Present (P)'}
+            </button>
+          </>
+        )}
       </div>
     </header>
   )

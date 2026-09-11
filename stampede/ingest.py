@@ -104,6 +104,7 @@ class Ingest:
             "logs_swap_kept": 0,
             "logs_swap_other_v4_forks_dropped": 0,
             "logs_transfer_kept": 0,
+            "logs_lifecycle_kept": 0,
             "logs_transfer_seen": 0,
             "swap_txs": 0,
             "blocks_missing": [],
@@ -154,21 +155,26 @@ class Ingest:
     def _fetch_rpc(self, fr: int, to: int) -> None:
         if self.rpc.alchemy_url:
             # Alchemy: swaps + transfers in ONE topic filter, 10-block sub-ranges, 4 workers (~4 calls/s = free-tier CU cap)
-            logs, failed = self.rpc.get_logs_parallel(fr, to, topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER]], workers=self.workers)
+            logs, failed = self.rpc.get_logs_parallel(fr, to, topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER] + chain.LIFECYCLE_TOPICS], workers=self.workers)
             for f in failed:
                 # retry each failed sub-range once, sequentially
                 try:
-                    logs.extend(self.rpc.get_logs(f[0], f[1], topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER]]))
+                    logs.extend(self.rpc.get_logs(f[0], f[1], topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER] + chain.LIFECYCLE_TOPICS]))
                 except Exception as e:  # noqa: BLE001
                     self.stats["chunk_failures"] += 1
                     self.stats["blocks_missing"].append([f[0], f[1], redact(str(e))[:120]])
-            swaps = self._keep_swaps([l for l in logs if l["topics"][0] != chain.T_TRANSFER])
+            lifecycle = [l for l in logs if (l["topics"][0] in (chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED) and l["address"].lower() in (chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK)) or l["topics"][0] == chain.T_CURVE_COMPLETED]
+            swaps = self._keep_swaps([l for l in logs if l["topics"][0] in chain.SWAP_TOPICS])
             transfers = [l for l in logs if l["topics"][0] == chain.T_TRANSFER]
             src = "alchemy"
         else:
             swaps = self._keep_swaps(self.rpc.get_logs(fr, to, topics=[chain.SWAP_TOPICS]))
             transfers = self.rpc.get_logs(fr, to, topics=[[chain.T_TRANSFER]])
+            lifecycle = self.rpc.get_logs(fr, to, topics=[chain.LIFECYCLE_TOPICS])
             src = "public_rpc"
+        # launch / graduation lifecycle events: kept regardless of swaps (a launch tx has no swap unless launchAndBuy)
+        self.store.insert_logs(log_row(l, src) for l in lifecycle)
+        self.stats["logs_lifecycle_kept"] += len(lifecycle)
         txs = {l["transactionHash"] for l in swaps}
         self.stats["logs_transfer_seen"] += len(transfers)
         keep_tr = [l for l in transfers if l["transactionHash"] in txs]

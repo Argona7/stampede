@@ -207,3 +207,104 @@ export interface EventsPage {
   has_more: boolean
   session: SessionState
 }
+
+
+// ---- radar ----
+export interface RadarSource {
+  address: string
+  symbol: string
+  wallets: number
+}
+
+export interface RadarRow extends TokenLabel {
+  symbol_raw?: string
+  inflow_10m: number
+  inflow_prev_per_10m: number
+  accel: number
+  breadth: number
+  wallets_range: number
+  sequences_range: number
+  sequences_10m: number
+  sources: RadarSource[]
+  quality: number | null
+  age_s: number | null
+  stage: 'curve' | 'graduated' | 'unknown'
+  progress: number | null
+  graduated_ts: number | null
+  first_inflow_ts: number
+  last_inflow_ts: number
+  spark: number[]
+  mentions_1h: number | null
+  mentions_24h: number | null
+  score: number
+  parts: Record<string, number | boolean>
+  price_quote: number | null
+  quote_symbol: string | null
+  chg_5m: number | null
+  chg_1h: number | null
+  vol_1h_quote: number
+  buyers_1h: number
+  market_now?: { price_usd: number | null; fdv_usd: number | null; reserve_usd: number | null; vol_h1: number | null; chg_h1: number | null; url: string; fetched_at: number }
+  holders?: { holders: number; top10_share: number; dev_share: number | null; dev_sold_share: number; launch_block_buyers: number; as_of_block: number }
+}
+
+export interface RadarResponse {
+  clock: number | null
+  window_s: number
+  span_s: number
+  rows: RadarRow[]
+  total: number
+  presets: Record<string, { label: string } & Record<string, unknown>>
+  preset?: string | null
+  bots_excluded?: number
+  wallet_scores_known?: number
+  context?: { policy: string; enabled: boolean; x_enabled: boolean; last_cycle: number | null; budget: Record<string, { calls_today: number }> }
+  waiting?: boolean
+  session?: SessionState
+}
+
+export interface CoinDetail extends TokenLabel {
+  symbol_raw?: string
+  launch: { deployer: string; pair_token: string; threshold: number | null; block: number; ts: number | null; tx_hash: string; source: string } | null
+  age_s: number | null
+  progress: { progress: number | null; stage: string; graduated: boolean; curve_trades: number; curve_traders: number; threshold_raw: number | null; net_quote_raw: number; graduation: { ts: number | null; tx_hash: string | null } | null }
+  as_of: { price_quote: number | null; quote_symbol: string | null; chg_5m: number | null; chg_1h: number | null; vol_1h_quote: number; trades_1h: number; buyers_1h: number; buys_1h?: number; as_of_ts: number }
+  inbound: { token: TokenLabel; wallets_main: number; wallets_all: number }[]
+  outbound: { token: TokenLabel; wallets_main: number; wallets_all: number }[]
+  buyers: number
+  sellers: number
+  new_buyers: number
+  socials: { twitter: string | null; telegram: string | null; website: string | null; description: string | null; declared_in: string } | null
+  market_now: { found?: boolean; price_usd: number | null; fdv_usd: number | null; reserve_usd: number | null; vol_h1: number | null; vol_h24?: number | null; chg_h1: number | null; chg_h24?: number | null; url: string; fetched_at: number; dex?: string } | null
+  market_cached: CoinDetail['market_now']
+  mentions: { mentions_1h: number; mentions_24h: number; distinct_authors: number; truncated: boolean; top: { url: string | null; author: string | null; followers: number | null; likes: number | null; text: string }[]; query: string; fetched_at: number } | null
+  x_account: { handle: string; name: string | null; followers: number | null; created_at: string | null; verified: boolean | null; url: string } | null
+  holders: { holders?: number; top10_share?: number; dev_share?: number | null; dev_sold_share?: number; launch_block_buyers?: number; as_of_block?: number; error?: string; top?: { address: string; share: number }[] } | null
+  links: { explorer: string; geckoterminal: string; pons: string }
+  note: string
+}
+
+export interface AlertRow {
+  id: number
+  created_ts: number
+  clock_ts: number
+  mode: string
+  token: string
+  symbol: string
+  rule: string
+  score: number
+  inflow: number
+  mentions_1h: number | null
+  price: number | null
+  detail: { rank: number; sources: RadarSource[]; accel: number; breadth: number; age_s: number | null; stage: string; mentions_known: boolean } | null
+  outcome_30m: number | null
+  outcome_60m: number | null
+  graduated_after: number | null
+}
+
+export interface AlertsResponse {
+  alerts: AlertRow[]
+  rules: Record<string, Record<string, number>>
+  track_record: { fired: number; with_outcome_30m: number; up_30m: number; median_30m: number | null; note: string }
+  worker: { running: boolean; last_cycle: number | null; last_error: string | null; cycles: number; context_enabled: boolean; alerts_fired: number }
+}

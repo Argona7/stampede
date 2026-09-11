@@ -84,7 +84,20 @@ EXPECTED_TOPICS = {
 }
 
 SWAP_TOPICS = [T_CURVE_BUY, T_CURVE_SELL, T_V4_SWAP]
-KIND_BY_TOPIC = {T_CURVE_BUY: "curve_buy", T_CURVE_SELL: "curve_sell", T_V4_SWAP: "v4_swap", T_TRANSFER: "transfer"}
+# PoolRegistered on the PONS V2MemeHook fires when a graduated pool is created; payload = [memecoin, quoteToken, creator].
+# topic0 as documented by Bitquery's Pons API guide (2026-09); the event signature itself is not published.
+T_POOL_REGISTERED = "0x01bf263a1db1652580721573296e1a1fa70b3d4c87f61d02a69c4e1109d2d573"
+LIFECYCLE_TOPICS = [T_TOKEN_LAUNCHED, T_CURVE_COMPLETED, T_POOL_REGISTERED]
+PONS_V2_LOCKER = "0x267444d099b10fb5ed7c3cc7b7c767adca574952"  # holds the permanently locked supply of graduated tokens
+KIND_BY_TOPIC = {
+    T_CURVE_BUY: "curve_buy",
+    T_CURVE_SELL: "curve_sell",
+    T_V4_SWAP: "v4_swap",
+    T_TRANSFER: "transfer",
+    T_TOKEN_LAUNCHED: "token_launched",
+    T_CURVE_COMPLETED: "curve_completed",
+    T_POOL_REGISTERED: "pool_registered",
+}
 
 # --- selectors for eth_call ---
 S_TOKEN = selector("token()")
