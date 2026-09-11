@@ -1287,3 +1287,129 @@ hr {
   color: var(--secondary);
   font-size: 14px;
 }
+
+/* ---- live HUD over the 3D scene ---- */
+.hud {
+  position: absolute;
+  top: 34px;
+  left: 14px;
+  width: 360px;
+  pointer-events: none;
+  font-size: 12px;
+  z-index: 3;
+}
+
+.hud-counters {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 14px;
+  margin-bottom: 12px;
+}
+
+.hud-counters div {
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+
+.hud-counters b {
+  display: block;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.hud-counters span {
+  color: var(--secondary);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hud-title {
+  color: var(--secondary);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin: 0 0 4px;
+}
+
+.hud-row {
+  display: grid;
+  grid-template-columns: 16px 44px minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 3px 6px;
+  border-left: 2px solid transparent;
+  pointer-events: auto;
+  cursor: pointer;
+  background: rgba(5, 5, 5, 0.55);
+}
+
+.hud-row .n {
+  color: var(--muted);
+}
+
+.hud-row .in b {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--text);
+}
+
+.hud-row .sym {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-row .from {
+  grid-column: 3;
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.hud-row .meta {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hud-row.hot {
+  border-left-color: var(--primary);
+  animation: rowflash 2.4s ease-out;
+}
+
+.hud-row.hot .in b {
+  color: var(--primary);
+}
+
+.hud-row.sel {
+  background: var(--active);
+  border-left-color: var(--primary);
+}
+
+.map.has-caption .hud-counters {
+  display: none;
+}
+
+.corner button {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.lbl.hot .sym {
+  color: var(--text);
+}
+
+.lbl .hotn {
+  margin-left: 6px;
+  color: var(--primary);
+  font-weight: 600;
+}

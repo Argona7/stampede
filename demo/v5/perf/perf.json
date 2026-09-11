@@ -1,0 +1,96 @@
+{
+ "recorded_at_utc": "2026-09-11T13:34:08.334Z",
+ "base": "http://127.0.0.1:8791",
+ "session_id": "S-d40b66",
+ "replay_speed": 20,
+ "replay_clock_start_ts": 1789060917,
+ "replay_clock_end_ts": 1789061397,
+ "stops": [
+  {
+   "i": 1,
+   "edge": {
+    "kind": "edge",
+    "from": "0x6c36aa7f9128d67cc0e114a59841d572849c1a01",
+    "to": "0x4ad59292fe286460f5e533dfabe4a868e1e87b08"
+   },
+   "caption": "54 WALLETS SOLD Piecoin·1a01 → BOUGHT TruffleHog·7b08"
+  },
+  {
+   "i": 2,
+   "edge": {
+    "kind": "edge",
+    "from": "0x7710fe2c159e3c8ff648f7252b9dc69d25f63c5a",
+    "to": "0xdefde5ed997f18ed3c1586cf71f24a6396b08efb"
+   },
+   "caption": "37 WALLETS SOLD PUCHATO → BOUGHT STEPPER"
+  },
+  {
+   "i": 3,
+   "edge": {
+    "kind": "edge",
+    "from": "0x8a6aef9d80f98b0e9589de54eb3ca95cc34ec0f4",
+    "to": "0x4c8f16e8caeb80a938a7ecca765635ac866fef4a"
+   },
+   "caption": "29 WALLETS SOLD egregore → BOUGHT credit"
+  },
+  {
+   "i": 4,
+   "edge": {
+    "kind": "edge",
+    "from": "0x1a4ec4d15f717c9384fa98605a12f2efd4e3e085",
+    "to": "0x6cdb0fbba93d579de3cbea933b50a823087155b0"
+   },
+   "caption": "124 WALLETS SOLD TruffleHog·e085 → BOUGHT LUNAR·55b0"
+  }
+ ],
+ "marks": [
+  {
+   "name": "boot",
+   "note": "page opens: the visible history streams through the tape while the 3D network builds up in time order",
+   "offset_s": 0.1
+  },
+  {
+   "name": "play",
+   "note": "replay at 20x: pulses on edges, HUD counters and top-inflow list move, hot coins get red halos",
+   "offset_s": 2.8
+  },
+  {
+   "name": "stop1",
+   "note": "autopilot stop 1: 54 WALLETS SOLD Piecoin·1a01 → BOUGHT TruffleHog·7b08",
+   "offset_s": 6.5
+  },
+  {
+   "name": "stop2",
+   "note": "autopilot stop 2: 37 WALLETS SOLD PUCHATO → BOUGHT STEPPER",
+   "offset_s": 13.5
+  },
+  {
+   "name": "stop3",
+   "note": "autopilot stop 3: 29 WALLETS SOLD egregore → BOUGHT credit",
+   "offset_s": 20.5
+  },
+  {
+   "name": "stop4",
+   "note": "autopilot stop 4: 124 WALLETS SOLD TruffleHog·e085 → BOUGHT LUNAR·55b0",
+   "offset_s": 27.7
+  },
+  {
+   "name": "radar",
+   "note": "RADAR: the same coins as a ranked board with score parts, sources, price, holders, alerts journal",
+   "offset_s": 29.8
+  },
+  {
+   "name": "flow",
+   "note": "FLOW: where the top coin’s wallets came from and where they went",
+   "offset_s": 34.9
+  },
+  {
+   "name": "end",
+   "note": "",
+   "offset_s": 39.1
+  }
+ ],
+ "perf": {
+  "readout": "60 fps · p50 16.7 ms · p95 16.8 ms · 230 edges · 166 nodes"
+ }
+}

@@ -1,0 +1,4 @@
+session S-d40b66, replay 20x, clock start 17:21:57 UTC
+web take from 0.2s for 39.1s (marks {"boot": 0.1, "play": 3.1, "stop1": 6.7, "stop2": 13.7, "stop3": 20.9, "stop4": 27.7, "radar": 30, "flow": 35.1, "end": 39.3})
+stops: ["54 WALLETS SOLD Piecoin\u00b71a01 \u2192 BOUGHT TruffleHog\u00b77b08", "37 WALLETS SOLD PUCHATO \u2192 BOUGHT STEPPER", "29 WALLETS SOLD egregore \u2192 BOUGHT credit", "19 WALLETS SOLD AUTON\u00b75eab \u2192 BOUGHT egregore"]
+cut-7s-stop: from 9.1s

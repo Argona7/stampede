@@ -3,6 +3,7 @@ import { api } from './client'
 import Caption from './components/Caption'
 import CoinDrawer from './components/CoinDrawer'
 import Flow from './components/Flow'
+import MapHud from './components/MapHud'
 import Radar from './components/Radar'
 import { DEFAULT_RADAR, type RadarFilters } from './radarFilters'
 import Controls, { type Filters } from './components/Controls'
@@ -19,6 +20,7 @@ import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Rece
 const SESSION_POLL_MS = 1000
 const EVENTS_POLL_MS = 1500
 const STATUS_POLL_MS = 5000
+const TOUR_MS = 7000
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -205,7 +207,6 @@ export default function App() {
   const radarTick = radarClock === null ? 0 : Math.floor(radarClock / 30)
   const coinTick = radarClock === null ? 0 : Math.floor(radarClock / 60)
   useEffect(() => {
-    if (view === 'map') return
     let alive = true
     let busy = false
     const tick = () => {
@@ -271,6 +272,59 @@ export default function App() {
     setView('flow')
   }, [])
 
+  // ---- autopilot: in MAP presentation, tour the top radar coins (fly -> caption -> next); any manual
+  // interaction stops it. Every stop is a real edge with its computed count, in the order the radar ranks them.
+  const [autopilot, setAutopilot] = useState(params.get('autopilot') === '1')
+  const tourIdx = useRef(0)
+  const tourTimer = useRef<number | null>(null)
+  const graphRef = useRef<Graph | null>(null)
+  graphRef.current = graph
+  const visited = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!autopilot || view !== 'map' || !graph?.edges.length) return
+    const step = () => {
+      // the strongest observed flows in the range *as of now*, biggest first, each pair visited once per round
+      const g = graphRef.current
+      if (!g) return
+      const flows = [...g.edges].filter((e) => e.wallets_main >= 3).sort((a, b) => b.wallets_main - a.wallets_main).slice(0, 10)
+      let e = flows.find((x) => !visited.current.has(`${x.from}->${x.to}`))
+      if (!e) {
+        visited.current.clear()
+        e = flows[0]
+      }
+      if (!e) return
+      visited.current.add(`${e.from}->${e.to}`)
+      tourIdx.current += 1
+      setSelection({ kind: 'edge', from: e.from, to: e.to })
+      setFocusNonce((n) => n + 1)
+    }
+    if (tourTimer.current === null) {
+      // first stop soon after the overview settles, then one stop every TOUR_MS
+      tourTimer.current = window.setTimeout(function tick() {
+        step()
+        tourTimer.current = window.setTimeout(tick, TOUR_MS)
+      }, 2600)
+    }
+    return () => {
+      if (tourTimer.current !== null) {
+        window.clearTimeout(tourTimer.current)
+        tourTimer.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autopilot, view, graph === null])
+  const stopAutopilot = useCallback(() => setAutopilot(false), [])
+  useEffect(() => {
+    if (!autopilot) return
+    const off = () => stopAutopilot()
+    window.addEventListener('pointerdown', off)
+    window.addEventListener('wheel', off, { passive: true })
+    return () => {
+      window.removeEventListener('pointerdown', off)
+      window.removeEventListener('wheel', off)
+    }
+  }, [autopilot, stopAutopilot])
+
   // ---- details for the selection ----
   useEffect(() => {
     if (!selection) {
@@ -308,10 +362,10 @@ export default function App() {
   // automation hook (demo recording, tests): same code path as a click
   useEffect(() => {
     ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
-    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, coin: coinAddr, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing })
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, coin: coinAddr, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current })
     ;(window as unknown as { __stampede_view?: (v: 'radar' | 'flow' | 'map') => void }).__stampede_view = setView
     ;(window as unknown as { __stampede_coin?: (a: string) => void }).__stampede_coin = openFlow
-  }, [select, viewState, selection, layout, renderer, graph, session, view, coinAddr, radarData, openFlow])
+  }, [select, viewState, selection, layout, renderer, graph, session, view, coinAddr, radarData, openFlow, autopilot])
 
   // keys: E evidence, Esc back, P presentation, space play/pause
   useEffect(() => {
@@ -320,7 +374,8 @@ export default function App() {
       if (e.key === 'Escape') {
         if (drawerOpen) setDrawerOpen(false)
         else select(null)
-      } else if (e.key === '1') setView('radar')
+      } else if (e.key === 'a' || e.key === 'A') setAutopilot((v) => !v)
+      else if (e.key === '1') setView('radar')
       else if (e.key === '2') setView('flow')
       else if (e.key === '3') setView('map')
       else if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
@@ -351,6 +406,7 @@ export default function App() {
     return session.from_ts && session.to_ts ? { min: session.from_ts, max: session.to_ts } : null
   }, [session, mode, liveLastTs])
 
+  const hotCoins = useMemo(() => new Map((radarData?.rows ?? []).slice(0, 12).map((r) => [r.address, r.inflow_10m] as [string, number])), [radarData])
   const edgesShown = graph?.edges.length ?? 0
   const edgesTotal = graph?.totals.edges_matching ?? 0
   const presentation = layout === 'presentation'
@@ -400,6 +456,8 @@ export default function App() {
               revealAt={revealAt}
               revealRange={fromTs !== null && toTs !== null ? { from: fromTs, to: toTs } : null}
               hudRight={presentation && showTape && !evidenceOpen ? 470 : 0}
+              hudLeft={presentation ? 384 : 0}
+              hot={hotCoins}
             />
           ) : (
             <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={new Map(pulses.map((p) => [p.key, p.at]))} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
@@ -415,7 +473,13 @@ export default function App() {
             </span>
             {mode !== 'live' && status && <span>{mode === 'replay' ? 'REPLAY' : 'RECORDED'} · {status.sample.label}</span>}
             {stale && <span className="badge stale">STALE · data age {status?.data.age_s ?? '?'} s</span>}
+            {presentation && (
+              <button className={autopilot ? 'on' : ''} onClick={() => setAutopilot((v) => !v)} style={{ pointerEvents: 'auto' }} data-testid="autopilot">
+                {autopilot ? 'Autopilot on (A)' : 'Autopilot (A)'}
+              </button>
+            )}
           </div>
+          {presentation && <MapHud radar={radarData} graph={graph} feed={feed} fresh={freshTokens} clock={toTs} selection={selection} onPick={(from, to) => { setAutopilot(false); select({ kind: 'edge', from, to }) }} />}
           {showPerf && perf && (
             <div className="perf">
               {perf.fps} fps · p50 {perf.p50_ms} ms · p95 {perf.p95_ms} ms · {perf.drawn_edges} edges · {perf.nodes} nodes

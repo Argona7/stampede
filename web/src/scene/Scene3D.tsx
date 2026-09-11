@@ -45,7 +45,11 @@ interface Props {
   revealAt?: number | null // performance.now() of the last history (re)load: the graph builds up in time order
   revealRange?: { from: number; to: number } | null
   hudRight?: number // px of HUD (tape) covering the right edge: the overview is framed into the remaining width
+  hot?: Map<string, number> // coins with rotation inflow in the last 10 min -> wallets (radar top rows)
+  hudLeft?: number // px of HUD covering the left edge (top-inflow list)
 }
+
+const AFTERGLOW_MS = 18000
 
 export const REVEAL_MS = 2600
 
@@ -115,6 +119,8 @@ export default function Scene3D(p: Props) {
     reveal: { buckets: { geo: THREE.BufferGeometry | LineSegmentsGeometry; instanced: boolean; edgeTs: number[]; segs: number }[]; nodeTs: number[] } | null
     revealedNodes: number
     nodeRank: Map<string, number>
+    hotGroup: THREE.Group
+    glow: { key: string; line: THREE.Line; start: number }[]
   } | null>(null)
   const propsRef = useRef(p)
   propsRef.current = p
@@ -160,7 +166,8 @@ export default function Scene3D(p: Props) {
     const lineGroup = new THREE.Group()
     const selGroup = new THREE.Group()
     const pulseGroup = new THREE.Group()
-    scene.add(lineGroup, selGroup, pulseGroup)
+    const hotGroup = new THREE.Group()
+    scene.add(lineGroup, hotGroup, selGroup, pulseGroup)
     st.current = {
       renderer,
       scene,
@@ -191,6 +198,8 @@ export default function Scene3D(p: Props) {
       reveal: null,
       revealedNodes: Infinity,
       nodeRank: new Map(),
+      hotGroup,
+      glow: [],
     }
     const ro = new ResizeObserver(() => {
       const r = wrap.getBoundingClientRect()
@@ -259,6 +268,26 @@ export default function Scene3D(p: Props) {
         animating = true
       }
       s.activePulses = live
+      // afterglow: an edge that just received sequences stays faintly red for a while, then fades
+      const keepGlow: typeof s.glow = []
+      for (const g of s.glow) {
+        const t = (now - g.start) / AFTERGLOW_MS
+        if (t >= 1) {
+          s.pulseGroup.remove(g.line)
+          continue
+        }
+        ;(g.line.material as THREE.LineBasicMaterial).opacity = 0.55 * (1 - t)
+        keepGlow.push(g)
+        animating = true
+      }
+      s.glow = keepGlow
+      // hot-coin halos breathe slowly (one cycle per 2.4 s), scaled to stay ~constant on screen
+      for (const h of s.hotGroup.children) {
+        const dist = s.camera.position.distanceTo(h.position)
+        const k = Math.max(1, dist * 0.0011) * (1 + 0.08 * Math.sin(now / 380 + h.position.x))
+        h.scale.setScalar(k)
+        animating = true
+      }
       if (s.controls.enableDamping && !s.keys.length) animating = animating || false
       // frame timing (only while rendering continuously)
       if (s.lastFrame) {
@@ -337,7 +366,10 @@ export default function Scene3D(p: Props) {
       const want = new Map<string, 'big' | 'small'>()
       for (const id of selNodes) want.set(id, 'big')
       if (hov && !want.has(hov)) want.set(hov, 'small')
+      const hotMap = propsRef.current.hot
       if (vs === 'overview' && s.layout) {
+        // hot coins (radar inflow) first, then the biggest hubs up to the budget
+        if (hotMap) for (const id of hotMap.keys()) if (s.layout.nodes.has(id) && !want.has(id)) want.set(id, 'small')
         const budget = propsRef.current.labelBudget
         const ranked = [...s.layout.nodes.values()].sort((a, b) => b.degree - a.degree)
         for (const n of ranked.slice(0, budget)) if (!want.has(n.id)) want.set(n.id, 'small')
@@ -376,9 +408,10 @@ export default function Scene3D(p: Props) {
         el.style.display = behind || x < -50 || x > W + 50 || y < -20 || y > H + 20 ? 'none' : 'block'
         el.style.opacity = kind === 'big' ? '1' : String(fade)
         const role = sel?.kind === 'edge' ? (id === sel.from ? 'A · SOLD' : id === sel.to ? 'B · BOUGHT' : '') : ''
-        const cls = `lbl ${kind}` + (role.startsWith('A') ? ' a' : role.startsWith('B') ? ' b' : '')
+        const hotN = hotMap?.get(id)
+        const cls = `lbl ${kind}` + (role.startsWith('A') ? ' a' : role.startsWith('B') ? ' b' : '') + (kind === 'small' && hotN ? ' hot' : '')
         if (el.className !== cls) el.className = cls
-        const txt = kind === 'big' ? `<span class="role">${role}</span><span class="sym">${n.symbol}</span><span class="addr">${n.short}</span>` : `<span class="sym">${n.symbol}</span>`
+        const txt = kind === 'big' ? `<span class="role">${role}</span><span class="sym">${n.symbol}</span><span class="addr">${n.short}</span>` : hotN ? `<span class="sym">${n.symbol}</span><span class="hotn">+${hotN}</span>` : `<span class="sym">${n.symbol}</span>`
         if (el.innerHTML !== txt) el.innerHTML = txt
         if (kind === 'big') bigPos.set(id, { x, y, rpx })
       }
@@ -702,9 +735,10 @@ export default function Scene3D(p: Props) {
       const drifted = home.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.105)
       // with a HUD on the right, look a little to the right so the network sits in the free part of the frame
       const W = s.renderer.domElement.getBoundingClientRect().width || 1440
-      const hud = Math.min(0.45, (p.hudRight ?? 0) / W)
+      const hudR = Math.min(0.45, (p.hudRight ?? 0) / W)
+      const hudL = Math.min(0.4, (p.hudLeft ?? 0) / W)
       const visW = 2 * home.length() * Math.tan((s.camera.fov * Math.PI) / 360) * s.camera.aspect
-      const origin = new THREE.Vector3(visW * hud * 0.5, 0, 0)
+      const origin = new THREE.Vector3(visW * (hudR - hudL) * 0.5, 0, 0)
       const revealing = p.revealAt && performance.now() - p.revealAt < REVEAL_MS
       if (revealing) {
         // build-up: start far out and dolly in while the graph appears in time order
@@ -733,14 +767,20 @@ export default function Scene3D(p: Props) {
       // FOLLOW 2: travel along the route to B, B in front
       const k2: Key = { pos: B.clone().add(side.clone().multiplyScalar(0.4 * near)).add(new THREE.Vector3(0, -0.3 * near, 0.75 * near)), look: B.clone(), dur: 1000 }
       // EVIDENCE: settle where both are visible, apart, with the route between them and room for the caption
-      const far = Math.max(560, 2.2 * d + 260)
+      const far = Math.max(620, 3.1 * d + 300) // wide pairs must fit the free band between HUD and tape
       // framing in camera terms: the caption owns the bottom-left, the evidence panel the right 45%.
       // Without the panel the pair sits upper-right of centre; with it, upper-left-of-centre.
       const dir = new THREE.Vector3(0.12, -0.3, 0.9).normalize() // from the look point towards the camera
       const viewDir = dir.clone().negate()
       const camRight = new THREE.Vector3().crossVectors(viewDir, s.camera.up).normalize() // screen-right in world space
       const camUp = new THREE.Vector3().crossVectors(camRight, viewDir).normalize() // screen-up in world space
-      const shiftX = p.panelOpen || (p.hudRight ?? 0) > 0 ? 0.12 : -0.3 // a panel or the tape owns the right side: keep the pair left of centre
+      // free horizontal band between the left HUD and whatever owns the right side (panel or tape)
+      const Wpx = s.renderer.domElement.getBoundingClientRect().width || 1440
+      const leftEdge = Math.min(0.4, (p.hudLeft ?? 0) / Wpx)
+      const rightEdge = 1 - (p.panelOpen ? 0.45 : Math.min(0.45, (p.hudRight ?? 0) / Wpx))
+      const pairFrac = leftEdge === 0 && rightEdge === 1 ? 0.75 : (leftEdge + rightEdge) / 2
+      const visFrac = 2 * Math.tan((s.camera.fov * Math.PI) / 360) * s.camera.aspect // visible width at distance far, in units of far
+      const shiftX = (0.5 - pairFrac) * visFrac
       const look = mid.clone().addScaledVector(camRight, shiftX * far).addScaledVector(camUp, -0.2 * far)
       const k3: Key = {
         pos: look.clone().addScaledVector(dir, far),
@@ -756,7 +796,26 @@ export default function Scene3D(p: Props) {
     const N = new THREE.Vector3(n.x, n.y, n.z)
     fly([{ pos: N.clone().add(new THREE.Vector3(90, -220, 520)), look: N.clone(), dur: 1100, onDone: () => propsRef.current.onViewState('evidence') }])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen, p.revealAt, p.hudRight])
+  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen, p.revealAt, p.hudRight, p.hudLeft])
+
+  // ---- hot coins: a thin red halo around coins with rotation inflow right now ----
+  useEffect(() => {
+    const s = st.current
+    if (!s || !s.layout) return
+    s.hotGroup.clear()
+    const sel = propsRef.current.selection
+    for (const [id, n] of p.hot ?? []) {
+      const node = s.layout.nodes.get(id)
+      if (!node || n <= 0) continue
+      if (sel?.kind === 'edge' && (sel.from === id || sel.to === id)) continue
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(node.r + 3.5, 0.9, 6, 36), new THREE.MeshBasicMaterial({ color: RED, transparent: true, opacity: 0.55 }))
+      ring.position.set(node.x, node.y, node.z)
+      ring.lookAt(s.camera.position)
+      s.hotGroup.add(ring)
+    }
+    s.needs = true
+    ;(s as unknown as { loop: () => void }).loop()
+  }, [p.hot, p.selection, layoutVersion])
 
   // ---- pulses: one travelling marker per newly observed batch on an edge ----
   useEffect(() => {
@@ -775,6 +834,14 @@ export default function Scene3D(p: Props) {
       const lg = new THREE.BufferGeometry().setFromPoints(s.edgePoints.get(pu.key)!)
       const line = new THREE.Line(lg, new THREE.LineBasicMaterial({ color: RED, transparent: true, opacity: 0.9 }))
       s.pulseGroup.add(line)
+      if (!s.glow.some((g) => g.key === pu.key)) {
+        const gl = new THREE.Line(lg.clone(), new THREE.LineBasicMaterial({ color: RED, transparent: true, opacity: 0.55 }))
+        s.pulseGroup.add(gl)
+        s.glow.push({ key: pu.key, line: gl, start: now })
+      } else {
+        const g = s.glow.find((x) => x.key === pu.key)!
+        g.start = now
+      }
       const label = document.createElement('div')
       label.className = 'pulse-lbl'
       label.textContent = `+${pu.count} sequence${pu.count === 1 ? '' : 's'}`

@@ -22,3 +22,5 @@ data/research-*.sqlite*
 data/wallet-scores-*.json
 demo/v4/raw/*.webm
 demo/v4/out/*.mp4
+demo/v5/raw/*.webm
+demo/v5/out/*.mp4
