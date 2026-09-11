@@ -1,97 +1,139 @@
+<!-- hero: added when the mascot master is approved (docs/assets/hero.gif, static fallback docs/assets/hero-static.png) -->
+
 # STAMPEDE
 
-Watch wallets move between coins on Robinhood Chain.
+**See what wallets sold before they bought the next coin.**
 
-STAMPEDE is a read-only map of *observed* wallet rotations between memecoins: a wallet sold token A and
-later bought token B inside a chosen time window. Nodes are coins, directed edges are observed
-`sell A → buy B` sequences, and every edge opens to the addresses, timestamps and transaction hashes
-behind it.
+STAMPEDE is a read-only explorer of *observed* wallet rotations on supported Robinhood Chain venues
+(PONS v2 bonding curves and the Uniswap v4 pools their coins graduate into). A rotation is one address that
+sold coin A and, inside a chosen window, bought coin B. The tool shows those sequences as a live feed, a
+ranked board, a flow diagram and a spatial map — always with the addresses, timestamps and transaction
+hashes behind every number. It does not claim that the sale funded the purchase, that addresses share an
+owner, or that anything will happen next.
 
-What an edge is **not**: it is not proof that the money from the sale funded the purchase, not proof
-that several addresses share an owner, not a prediction, and not a buy signal.
+[Quickstart](#quickstart) · [Watch demo](#watch-demo) · [How it works](#how-it-works) · [Data & limits](#data--limits)
 
-Two surfaces read one server and one shared replay clock: a full-screen **terminal UI** (`stampede
-terminal`, Feed and Radar screens) and a **web app** with three views: **RADAR** (coins ranked by what
-wallets are rotating into right now, with filters, presets, context and an alert journal), **FLOW** (the
-ego network of one coin: where its wallets came from and where they went) and **MAP** (the 2D/3D scene).
-Black / red / neutral text; red marks the brand, the selected route and newly observed sequences only.
+## Watch demo
 
-The radar score, presets, context modules (PONS lifecycle, GeckoTerminal, holders, X mentions) and the
-alert rule are documented in `docs/RADAR.md`; the measurement behind the thresholds is
-`docs/RESEARCH-RUNNERS.md` (`python -m stampede.research.backtest`).
+<a href="docs/DEMO-V5.md"><img src="docs/assets/demo-preview.gif" width="960" alt="8-second loop of the recorded replay: the tape streams the visible history, the 3D network of coins builds up in time order, the replay runs at 20x and the autopilot flies to the strongest observed route — 54 wallets sold Piecoin·1a01 and bought TruffleHog·7b08 within 30 minutes — and opens its evidence card"></a>
 
-Status: working prototype on one explicitly bounded sample (PONS v2 launchpad, 60 minutes). Not
-published anywhere; no token; nothing is sent to the chain.
+Recorded replay · 20× · not a live market feed. The full 44-second take (terminal intro, four autopilot stops,
+RADAR, FLOW) is described frame by frame in [`docs/DEMO-V5.md`](docs/DEMO-V5.md); the MP4 itself is
+distributed with the release, not in the Git history.
 
-## Documents
+## Quickstart
 
-- `docs/SOURCES.md`: measured data sources (public RPC, Alchemy, HyperSync, Blockscout, GeckoTerminal).
-- `docs/ALGORITHM.md`: universe, attribution, sequence grades, edge weight, timestamps.
-- `docs/COVERAGE.md`: what the sample contains, what it does not, verification against receipts.
-- `docs/EXAMPLES.md`: independently checkable sequences with transaction links and exact block times.
-- `docs/DEMO.md`: the first (v1) demo; `docs/DEMO-V2.md`: terminal + spatial scene demo, frame timing, edit notes.
-- `docs/ACCEPTANCE-RU.md`: acceptance table with evidence; `docs/RELEASE-CHECKLIST.md`: what to do before any publication.
-- `docs/VISUAL-AUDIT-RU.md`, `docs/TERMINAL-SPECTACLE-BRIEF-RU.md`, `docs/REFERENCE-NOTES-RU.md`: the review, the brief and the reference notes behind this stage.
+The repository ships a recorded sample: 60 minutes of PONS v2 trading on Robinhood Chain
+(2026-09-10 16:29:57–17:29:57 UTC), 146,329 trades, 33,743 wallets, 12,164 observed sequences in the
+30-minute window. Replaying it needs no Alchemy, Twitter or other API key.
 
-## Run
-
-Requirements: Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22+, an Alchemy app key for
-`robinhood-mainnet` (free tier is enough). Copy `.env.example` to `.env` and fill `ALCHEMY_KEY`.
-`HYPERSYNC_TOKEN` is optional; without it the ingest uses Alchemy.
+Requirements: Python 3.13 with [uv](https://docs.astral.sh/uv/); Node 22+ only if you want the web views
+(the terminal UI runs on the API alone). Download: the sample bundle is 17 MB (`data/demo/stampede-demo.sqlite.xz`)
+and unpacks to 139 MB in `data/demo.sqlite` on first start.
 
 ```sh
+git clone <repository-url> stampede && cd stampede
 uv sync
-uv run stampede probe                                    # docs/SOURCES.md, measured
-uv run stampede ingest --minutes 60 --label "PONS v2 sample, 60 min"
-uv run stampede normalize --reset                        # logs -> trades (Transfer-based attribution)
-uv run stampede rotate --all-windows                     # sequences + edges for 5 min / 30 min / 2 h
-uv run stampede verify --n 200                           # receipt cross-check via Alchemy
-uv run stampede report                                   # docs/COVERAGE.md + docs/EXAMPLES.md
-uv run pytest -q
-
-cd web && npm install && npm run build && cd ..
-python scripts/serve_daemon.py start --mode replay       # or --mode fixture / --mode live
-open http://127.0.0.1:8791/                              # web explorer; ?layout=presentation for the scene
-uv run stampede terminal --api-url http://127.0.0.1:8791 # the terminal UI, in Terminal/iTerm (120x36 or larger)
+cd web && npm ci && npm run build && cd ..      # web views; skip for terminal-only
+uv run stampede demo                            # http://127.0.0.1:8791/  (replay 20x, paused)
 ```
 
-Modes: `fixture` serves the recorded sample as a static snapshot; `replay` plays it back on a
-server-side clock shared by every client (`/api/session`: play, pause, seek, speed); `live` tails the
-chain head (measured head lag 2–5 s) and shows a provider error instead of a frozen "live" picture.
+In a second terminal (120×36 or larger; Terminal.app, iTerm, kitty, WezTerm all work):
 
-Terminal keys: `↑/↓` select, `Enter` open pair / coin card, `Esc` back, `/` filter, `End` follow tail,
-`Tab` feed/radar, `u g s a` radar presets, `r` refresh coin context, `space` play/pause, `←/→` seek 60 s,
-`[ ]` speed, `q` quit. Web keys: `1 2 3` RADAR / FLOW / MAP, click a row or a ribbon, `D` coin drawer,
-`E` evidence rows, `Esc` back, `P` presentation/explore (MAP), `T` tape, `space` play/pause.
+```sh
+uv run stampede terminal --api-url http://127.0.0.1:8791
+```
 
-External context (X mentions via twitterapi.io, GeckoTerminal market, holders via public RPC) is fetched
-in live mode only by default (`serve --context live|always|off`); `--notify` posts macOS notifications
-when the under-radar alert rule fires. Optional `.env` key: `TWITTERAPI_KEY`.
+Press `space` to start the replay in either surface; both read the same server clock, so a seek in the
+browser moves the terminal too. If the checkout has no bundle, `stampede demo --bundle-url <asset-url>`
+(or `STAMPEDE_DEMO_URL`) downloads it into place first.
 
-API: `/api/status` (scopes: fixed sample vs whole store), `/api/session` (shared clock), `/api/events`
-(observed sequences with stable ids and a cursor; `history` after a seek, `new` afterwards),
-`/api/radar` (ranked coins, score parts, presets, filters), `/api/coin/{t}` (everything about one coin;
-`?refresh=1` fetches live context), `/api/alerts` (journal + track record), `/api/graph`,
-`/api/edge/{a}/{b}`, `/api/token/{t}`, `/api/search`.
+Live mode tails the chain head and needs an Alchemy key: copy `.env.example` to `.env`, fill `ALCHEMY_KEY`,
+then `uv run stampede serve --mode live`. `TWITTERAPI_KEY` is optional and only feeds the X-mentions column.
+Keys are read from `.env` only and never printed.
 
-Research: `python -m stampede.research.backtest --db <store> --out docs/RESEARCH-RUNNERS.md --write-scores`
-then `uv run stampede wallet-scores --from <store>` to load wallet quality into the serving store.
+## Four views, one dataset
 
-Tests: `uv run pytest -q` (41) and, with the replay server running, `cd web && npx playwright test` (6).
+<img src="docs/assets/views.png" width="1280" alt="Four screenshots of the same replay session: TERMINAL (Textual UI with the feed of observed sequences, hot rotations and an activity sparkline), RADAR (ranked board of coins with score parts, inflow, sources and the alert journal), FLOW (ego network of one coin: where its wallets came from, where they went) and MAP (3D scene with the evidence card for one route)">
 
-## Layout
+- **TERMINAL** — `stampede terminal`: the stream of observed sequences as they happen on the replay clock, hot rotations, an activity sparkline, and a Radar screen (`Tab`). Every row is one wallet, one sell, one buy.
+- **RADAR** — coins ranked by what wallets are rotating *into* right now: inflow of distinct wallets per 10 minutes, acceleration, breadth of origins, wallet quality from the research backtest, age and curve stage. Presets `under radar`, `graduating`, `smart rotators`, `all`; every score part is shown next to the total ([`docs/RADAR.md`](docs/RADAR.md)).
+- **FLOW** — one coin in the centre, sources on the left, destinations on the right; ribbon width is the number of distinct wallets. Click a ribbon for the transactions.
+- **MAP** — the whole range as a graph: coins are nodes, observed rotations are directed edges; 3D with WebGL, 2D canvas fallback. Autopilot visits the strongest routes; `E` opens the evidence rows of the selected route.
+
+## From an event to evidence
+
+One row from the recorded sample, taken from the same route the demo flies to:
+
+| Step | Observed fact | Where to check |
+|---|---|---|
+| Wallet | `0xd60c7abcc6b15c26c525c0dd8828ffde32b07ab6` | [address on Blockscout](https://robinhoodchain.blockscout.com/address/0xd60c7abcc6b15c26c525c0dd8828ffde32b07ab6) |
+| Sell | 3,640,335 Piecoin for 22.848 USDG on the PONS curve, block 59570827, 2026-09-10 17:10:09 UTC | [tx 0x17da…a56d](https://robinhoodchain.blockscout.com/tx/0x17dacbaa69834e67fc52c26303dd9c85e9966e30b9d047388f2f60cd20a8a56d) |
+| Buy | 9,788,825 TruffleHog for 49.159 USDG on the PONS curve, block 59579393, 2026-09-10 17:24:35 UTC | [tx 0x20ed…4729](https://robinhoodchain.blockscout.com/tx/0x20ed0eef6f879b6b1004a8fdf44a6d99642dc380c0aa3604063e95ea9f554729) |
+| Sequence | `sell Piecoin → buy TruffleHog`, gap 866 s, grade *clean* (the wallet sold nothing else in the window) | `/api/edge/0x6c36…1a01/0x4ad5…7b08`, or `E` on the route in MAP |
+| Edge | 54 distinct wallets with direct/clean sequences on this route in the 30-minute window; 883 sequence rows, because a wallet that sold once and bought nine times counts nine rows and one wallet | the evidence card says both numbers; the edge weight uses wallets |
+
+Grades: *direct* — sell and buy in the same transaction; *clean* — the wallet sold only A in the window;
+*ambiguous* — it also sold other coins, listed but never counted in the weight. More checked examples,
+including negative cases, in [`docs/EXAMPLES.md`](docs/EXAMPLES.md).
+
+## How it works
 
 ```
-stampede/          Python package: chain constants, RPC client, ingest, normalize, rotation, coverage, API
-stampede/api/      FastAPI app, queries, shared session clock, event stream, live tail, radar, context worker + alerts
-stampede/context/  PONS lifecycle, GeckoTerminal market, X mentions, holders (cached external context)
-stampede/research/ runner backtest (walk-forward), wallet scores
-stampede/tui/      Textual terminal UI (stampede terminal)
-web/               Vite + React + TypeScript: strip, 2D explorer, WebGL 3D scene, presentation layout
-web/e2e/           Playwright tests and recording scripts
-scripts/           serve_daemon.py, bg.py, pty_check.py, tui_shot.py
-tests/             pytest: synthetic fixtures + one recorded Robinhood Chain receipt
-docs/              measured reports and the algorithm description
-demo/              screenshots, raw recording, cuts and edit notes
-data/              SQLite store (not committed)
+Robinhood Chain logs ──▶ ingest (Alchemy / public RPC / HyperSync)
+        │                      swap events + ERC-20 transfers, PONS lifecycle events
+        ▼
+   normalize ──▶ trades         who traded what (Transfer-based attribution), exact block times
+        ▼
+   rotate ──▶ sequences         sell A → buy B by the same wallet inside 5 min / 30 min / 2 h, graded
+        ▼
+   serve ──▶ FastAPI            one shared session clock: fixture | replay | live
+        │                        radar score, context modules, alert journal with outcomes
+        ├──▶ web/ (Vite + React + three.js)   RADAR · FLOW · MAP
+        └──▶ stampede terminal (Textual)      FEED · RADAR
 ```
+
+**What it does.** Reads public chain data, keeps every trade it derives with its transaction hash, and shows
+sequences in the order they happened. Replay and live are separate modes and labelled on every screen. The
+radar score is a ranking of observed inflow with all parts visible; the alert journal records what fired and
+what the price did 30 and 60 minutes later, measured on indexed trades.
+
+**What it does not.** It does not prove money flow between coins, does not attribute addresses to people or
+teams, does not send anything to the chain, and does not promise returns. The research note
+[`docs/RESEARCH-RUNNERS.md`](docs/RESEARCH-RUNNERS.md) measures how often a coin with a given inflow doubled
+within 30 minutes in one five-hour sample — a description of that sample, not a forecast, and most such spikes
+ended below the alert price by the end of the horizon.
+
+## Data & limits
+
+- Venues: PONS v2 bonding curves and graduated Uniswap v4 pools (V2MemeHook) on Robinhood Chain (chain id 4663). Other DEXes and plain transfers are outside the universe ([`docs/ALGORITHM.md`](docs/ALGORITHM.md)).
+- Sample: one recorded hour, verified against receipts; counts, rejected cases and the block-time method in [`docs/COVERAGE.md`](docs/COVERAGE.md). Coins with the same ticker are disambiguated by the last four hex digits of the address (`Piecoin·1a01`).
+- Attribution: the wallet is the address whose ERC-20 balance changed, not the transaction sender; swaps that net to zero or spread tokens over several recipients produce no trade.
+- Timestamps: exact block times where fetched, interpolated otherwise; interpolated times carry `≈` in the terminal and the tape and *(approx.)* in the evidence rows.
+- External context (GeckoTerminal market data, holders via public RPC, X mentions) is fetched in live mode only, cached with its fetch time, and off in `stampede demo`.
+- Measured source behaviour (rate limits, log ranges, head lag) in [`docs/SOURCES.md`](docs/SOURCES.md).
+
+## Development
+
+```sh
+uv sync && uv run pytest -q                     # 48 tests: normalization, rotation, radar, session, TUI, demo bundle
+cd web && npm ci && npm run build && npm run lint
+python scripts/serve_daemon.py start --mode replay   # serves data/stampede.sqlite on :8791 (own recorded store)
+cd web && npx playwright test                   # 8 end-to-end tests against the running server
+```
+
+Record your own sample with a free Alchemy key: `uv run stampede ingest --minutes 60`, `normalize --reset`,
+`rotate --all-windows`, `verify --n 200`, `report`; pack it for others with `stampede export-demo`.
+Full command reference, keys, API and layout: [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md). Demo edit notes
+and frame timings: [`docs/DEMO-V5.md`](docs/DEMO-V5.md).
+
+Known limits: the sample is one hour of one launchpad; radar thresholds were calibrated on five hours;
+`live` depends on Alchemy's free-tier limits (10-block `getLogs`, 429s under load); the 3D scene needs WebGL 2.
+
+Roadmap (planned, not shipped): (1) live mode on the public RPC alone, without an Alchemy key;
+(2) export of a route's evidence rows as CSV/JSON from the UI; (3) multi-hour recorded samples published as
+release assets alongside the 60-minute one.
+
+Contributing: open an issue with the transaction hashes you looked at; pull requests keep the honesty rules
+in `docs/ALGORITHM.md` (no claims beyond observed order of trades). License: not chosen yet — until a
+LICENSE file lands, the code is source-available for reading and running the demo, not for redistribution.
