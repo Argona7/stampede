@@ -62,7 +62,7 @@ export default function TopStrip({ status, session, statusError, view, startView
           onHome()
         }}
       >
-        <img className="mark" src="/brand-mark.svg" width={48} height={48} alt="" />
+        <img className="mark" src="/brand-bison.png" height={46} alt="" />
         <span className="wordmark">STAMPEDE</span>
         <span className="tagline">wallet rotations · Robinhood Chain</span>
       </a>

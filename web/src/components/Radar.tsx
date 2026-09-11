@@ -278,7 +278,7 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
             </div>
           ) : !data ? (
             <div className="state-block" data-testid="radar-loading">
-              <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+              <img className="mark" src="/brand-bison.png" height={46} alt="" />
               <div>
                 <b>Loading RADAR</b>
                 asking /api/radar for coins with rotation inflow in the last {windowName(session?.span_s ?? 1800)}…
@@ -294,7 +294,7 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
               </div>
               {shown.length === 0 ? (
                 <div className="state-block" data-testid="radar-empty">
-                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <img className="mark" src="/brand-bison.png" height={46} alt="" />
                   <div>
                     <b>No coins match at {utc(clock)} UTC</b>
                     0 coins pass {filters.preset === 'custom' ? 'the custom filters' : `preset ${filters.preset.replace('_', ' ')}`} ({emptyCause()}) in the last {windowName(data.span_s)}. Next: switch the preset to ALL, or open Filters and set age to any.

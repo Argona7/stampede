@@ -44,7 +44,7 @@ export default function CoinDrawer({ coin, loading, error, session, onClose, onR
       )}
       {!coin && loading && (
         <div className="state-block" style={{ padding: '14px 0' }}>
-          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <img className="mark" src="/brand-bison.png" height={46} alt="" />
           <div>
             <b>Loading coin</b>
             on-chain as-of numbers and cached context…

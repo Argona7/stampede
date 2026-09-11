@@ -74,7 +74,7 @@ export default function Flow({ coin, coinAddr, loading, drawerOpen, onFocus, onE
       <div className="flow">
         {bar(<span className="summary">FLOW · where one coin's wallets came from and where they went</span>)}
         <div className="state-block" data-testid="flow-empty">
-          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <img className="mark" src="/brand-bison.png" height={46} alt="" />
           <div>
             <b>{loading && coinAddr ? `Loading FLOW for ${coinAddr.slice(0, 6)}…${coinAddr.slice(-4)}` : 'No coin selected'}</b>
             {loading && coinAddr ? 'asking /api/coin for its inbound and outbound rotations…' : 'Pick a coin in RADAR (click a row, or ↑↓ then Enter) or click a coin on the MAP. FLOW then shows which coins its buyers sold before, and where its sellers went next.'}

@@ -60,7 +60,7 @@ export default function Details({ selection, edge, token, loading, error, onSele
     return (
       <aside className="detail" data-testid="detail-empty">
         <div className="state-block" style={{ padding: '10px 0' }}>
-          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <img className="mark" src="/brand-bison.png" height={46} alt="" />
           <div>
             <b>Nothing selected</b>
             Click a line (A → B) for the wallets that sold A and then bought B, with their transactions; click a coin for its buyers, sellers and edges.
@@ -86,7 +86,7 @@ export default function Details({ selection, edge, token, loading, error, onSele
       return (
         <aside className="detail">
           <div className="state-block" style={{ padding: '10px 0' }}>
-            <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+            <img className="mark" src="/brand-bison.png" height={46} alt="" />
             <div>
               <b>Loading evidence</b>
               sequence rows first, then exact block times and tx senders…
@@ -134,7 +134,7 @@ export default function Details({ selection, edge, token, loading, error, onSele
     return (
       <aside className="detail">
         <div className="state-block" style={{ padding: '10px 0' }}>
-          <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+          <img className="mark" src="/brand-bison.png" height={46} alt="" />
           <div>
             <b>Loading coin</b>
             buyers, sellers and the edges touching it in this range…

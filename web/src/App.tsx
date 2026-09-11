@@ -554,7 +554,7 @@ export default function App() {
             {!statusError && !graph && toTs !== null && (
               <div className="overlay-msg">
                 <div className="state-block">
-                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <img className="mark" src="/brand-bison.png" height={46} alt="" />
                   <div>
                     <b>Loading MAP</b>
                     asking /api/graph for the flows in {utc(fromTs)}–{utc(toTs)} UTC…
@@ -565,7 +565,7 @@ export default function App() {
             {!statusError && graph && graph.edges.length === 0 && (
               <div className="overlay-msg">
                 <div className="state-block">
-                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <img className="mark" src="/brand-bison.png" height={46} alt="" />
                   <div>
                     <b>No flows to draw</b>
                     no edge has {filters.minWallets}+ wallets in {utc(fromTs)}–{utc(toTs)} UTC. Next: lower “min wallets on an edge” in the left rail, or move the clock.
@@ -576,7 +576,7 @@ export default function App() {
             {!statusError && mode === 'live' && toTs === null && (
               <div className="overlay-msg">
                 <div className="state-block">
-                  <img className="mark" src="/brand-mark.svg" width={32} height={32} alt="" />
+                  <img className="mark" src="/brand-bison.png" height={46} alt="" />
                   <div>
                     <b>Waiting for the first live block</b>
                     nothing is drawn until the tail has indexed real data.

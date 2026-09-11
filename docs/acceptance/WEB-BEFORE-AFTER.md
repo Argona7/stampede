@@ -26,6 +26,7 @@ rows are the right-hand Details panel. The selected edge in both frames is the s
 
 ## Brand in the product
 
+- **Owner correction (after `5ffe83c`):** the strip and the loading/empty state blocks now show **the pixel bison** — `assets/brand/mascot-grid.png` (94×91 logical px, alpha, untouched) copied to `web/public/brand-bison.png`, `<img class="mark">` with `image-rendering: pixelated`, **46 px high × ≈47.5 px wide** (0.5× nearest-neighbour; 24 px was tried for the state blocks and decimates into speckle, so they use the same 46 px), 3 px above and below in the 52 px strip; `brand-mark.svg` is removed from `web/public` (the favicon stays); `radar-1440.png` / `flow-1440.png` re-taken at the same clock. The head-mark notes below are the pre-correction history.
 - **Where:** `web/src/components/TopStrip.tsx`, the persistent top strip of every view (RADAR, FLOW, MAP, presentation included).
 - **What:** `assets/brand/mark.svg` copied verbatim to `web/public/brand-mark.svg` (the 16×16 `<rect>` mark, `shape-rendering="crispEdges"`),
   rendered as `<img class="mark">` with `image-rendering: pixelated` at **48×48 px = 3× the master** (integer factor, per BRAND.md).

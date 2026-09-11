@@ -197,9 +197,9 @@ kbd {
 }
 
 .brand .mark {
-  /* 16x16 master at an integer factor (x3): the body is near-black on black, so the red plane must carry the shape */
-  width: 48px;
-  height: 48px;
+  /* the pixel bison (assets/brand/mascot-grid.png, 94x91 logical px), nearest-neighbour scaled to the strip */
+  height: 46px;
+  width: auto;
 }
 
 .brand .wordmark {
@@ -488,8 +488,9 @@ kbd {
 }
 
 .state-block .mark {
-  width: 32px;
-  height: 32px;
+  /* same bison, same 46px as the strip: below ~40px nearest-neighbour decimation turns it into speckle */
+  height: 46px;
+  width: auto;
   flex: none;
 }
 

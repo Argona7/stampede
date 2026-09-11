@@ -30,9 +30,13 @@ test('strip shows the brand mark, the shared session state, and the scene render
   await expect(page.locator('.badge')).toContainText(/PAUSED/)
   const mark = page.locator('.brand img.mark')
   await expect(mark).toBeVisible()
+  await expect(mark).toHaveAttribute('src', /brand-bison\.png$/)
   const box = await mark.boundingBox()
-  expect(box!.height).toBeGreaterThanOrEqual(24) // 16x16 pixel mark at an integer factor
-  expect(box!.height % 16).toBe(0)
+  expect(box!.height).toBe(46) // pixel bison (94x91) scaled nearest-neighbour into the 52px strip
+  expect(box!.width).toBeGreaterThan(44)
+  expect(box!.width).toBeLessThan(50)
+  expect(box!.y).toBeGreaterThan(0)
+  expect(box!.y + box!.height).toBeLessThan(52)
   await expect(page.locator('.scene3d canvas')).toBeVisible()
   await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
   const st = await page.evaluate(() => window.__stampede_state())
