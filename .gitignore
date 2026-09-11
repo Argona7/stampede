@@ -18,3 +18,7 @@ demo/raw/*.webm
 demo/out/*.mp4
 data/*.log
 data/serve.pid
+data/research-*.sqlite*
+data/wallet-scores-*.json
+demo/v4/raw/*.webm
+demo/v4/out/*.mp4

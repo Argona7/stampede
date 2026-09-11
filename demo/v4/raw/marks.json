@@ -1,0 +1,61 @@
+{
+ "recorded_at_utc": "2026-09-11T12:53:38.957Z",
+ "base": "http://127.0.0.1:8791",
+ "session_id": "S-d40b66",
+ "replay_speed": 20,
+ "replay_clock_start_ts": 1789060977,
+ "top_symbol": "CAT·fd23",
+ "marks": [
+  {
+   "name": "radar",
+   "note": "RADAR: coins ranked by rotation inflow, filters and presets, alerts journal on the right",
+   "offset_s": 3.1
+  },
+  {
+   "name": "play",
+   "note": "replay running at 20x: inflow counters move, rows flash when a coin gains wallets",
+   "offset_s": 3.2
+  },
+  {
+   "name": "drawer",
+   "note": "coin drawer for CAT·fd23: age, curve progress, price, rotation from/to, holders and X attention when fetched",
+   "offset_s": 12.6
+  },
+  {
+   "name": "flow",
+   "note": "FLOW: where CAT·fd23's wallets came from and where they went; ribbon width = distinct wallets",
+   "offset_s": 15.9
+  },
+  {
+   "name": "evidence",
+   "note": "MAP: the ribbon opens the pair in the 3D scene with the computed wallet count and evidence",
+   "offset_s": 20
+  },
+  {
+   "name": "alerts",
+   "note": "back to RADAR: the alert journal with 30-minute outcomes measured on indexed trades",
+   "offset_s": 23.9
+  },
+  {
+   "name": "end",
+   "note": "",
+   "offset_s": 24.8
+  }
+ ],
+ "final_state": {
+  "viewState": "evidence",
+  "selection": {
+   "kind": "edge",
+   "from": "0xab2ad649dfb7d8bc3b11eea95b98955e6bb038d6",
+   "to": "0xcc1e3e09e9372e9af0df880ff4ec2081820ffd23"
+  },
+  "layout": "presentation",
+  "renderer": "3d",
+  "view": "radar",
+  "coin": "0xcc1e3e09e9372e9af0df880ff4ec2081820ffd23",
+  "radarRows": 60,
+  "edges": 230,
+  "sessionClock": 1789061392,
+  "playing": false
+ }
+}

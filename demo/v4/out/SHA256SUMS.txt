@@ -1,0 +1,5 @@
+eaeb9bbcd342fbccdd0c91839f76b0c1322111206641f5842fc29c02ce2d5d07  raw/web-walkthrough.webm
+162639c5121c069d5528bc1b4667e4acadb0118b01bc5b9492d2df89373ca339  out/cut-5s-radar-to-flow.mp4
+86b4f536ca320b19e7c41a400d6662233a93b77f523f91a6c54f32cbfd10be52  out/seg-tui.mp4
+ad6da444d1a444830bc63132479e88df7468e06b7f4966dbd225fa7d648d0baf  out/seg-web.mp4
+a10dc3c73e47c4e2bfd95e7b12d61ebc9e93294ca08ba8486b710bbe0d41bde5  out/stampede-v4-radar.mp4

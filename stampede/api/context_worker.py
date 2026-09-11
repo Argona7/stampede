@@ -35,7 +35,7 @@ class ContextWorker(threading.Thread):
         self.top_n = top_n
         self.status: dict[str, Any] = {"running": False, "last_cycle": None, "last_error": None, "cycles": 0, "context_enabled": False, "alerts_fired": 0}
         self._stop = threading.Event()
-        self.rules = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}
+        self.rules = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}  # inflow 8-40 & age < 1 h & not already +100%: 20% runner rate (3.8x base) in docs/RESEARCH-RUNNERS.md
 
     def stop(self) -> None:
         self._stop.set()

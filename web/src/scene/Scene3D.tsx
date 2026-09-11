@@ -740,7 +740,7 @@ export default function Scene3D(p: Props) {
       const viewDir = dir.clone().negate()
       const camRight = new THREE.Vector3().crossVectors(viewDir, s.camera.up).normalize() // screen-right in world space
       const camUp = new THREE.Vector3().crossVectors(camRight, viewDir).normalize() // screen-up in world space
-      const shiftX = p.panelOpen ? 0.12 : -0.3
+      const shiftX = p.panelOpen || (p.hudRight ?? 0) > 0 ? 0.12 : -0.3 // a panel or the tape owns the right side: keep the pair left of centre
       const look = mid.clone().addScaledVector(camRight, shiftX * far).addScaledVector(camUp, -0.2 * far)
       const k3: Key = {
         pos: look.clone().addScaledVector(dir, far),

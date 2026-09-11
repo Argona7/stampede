@@ -105,6 +105,8 @@ def main() -> int:
     hours = max(1.0, (hi - lo) / 3600)
     bots = {w for w, n in trades_per_wallet.items() if n / hours > 60 or n > 500}
 
+    end_gain: dict[tuple[str, int], float | None] = {}
+
     def outcome(tok: str, m: int) -> tuple[bool | None, float | None, bool]:
         s = series.get(tok)
         if not s:
@@ -116,6 +118,8 @@ def main() -> int:
             return None, None, False
         mx = s.max_after(m, Hm)
         gain = (mx / p0 - 1) if mx else 0.0
+        pe = s.price_at(m + Hm)
+        end_gain[(tok, m)] = (pe / p0 - 1) if pe else None
         g = grad.get(tok)
         graduated = bool(g and m * 60 < g <= (m + Hm) * 60)
         return (gain >= a.runner_gain) or graduated, gain, graduated
@@ -176,7 +180,7 @@ def main() -> int:
             r, gain, graduated = outcome(tok, m)
             if r is None:
                 continue
-            signals.append({"tok": tok, "m": m, "now": now, "inflow10": len(w10), "accel": accel, "breadth": len(src10), "buyers10": len(buyers10), "rot_share": len(w10) / max(1, len(buyers10)), "momentum": momentum, "age": age, "runner": r, "gain": gain or 0.0, "graduated": graduated, "wallets": w10})
+            signals.append({"tok": tok, "m": m, "now": now, "inflow10": len(w10), "accel": accel, "breadth": len(src10), "buyers10": len(buyers10), "rot_share": len(w10) / max(1, len(buyers10)), "momentum": momentum, "age": age, "runner": r, "gain": gain or 0.0, "end": end_gain.get((tok, m)), "graduated": graduated, "wallets": w10})
     signals.sort(key=lambda x: x["now"])
     # wallet quality feature (walk-forward)
     hits: dict[str, list[int]] = defaultdict(lambda: [0, 0])
@@ -196,13 +200,14 @@ def main() -> int:
         sg["quality_cov"] = len(qs) / max(1, len(sg["wallets"]))
 
     def table(name: str, groups: list[tuple[str, list[dict[str, Any]]]]) -> list[str]:
-        lines = [f"### {name}", "", "| bucket | signals | coins | runner rate | lift vs base | median max gain | graduated |", "|---|---|---|---|---|---|---|"]
+        lines = [f"### {name}", "", "| bucket | signals | coins | runner rate | lift vs base | median max gain | median gain at +H | graduated |", "|---|---|---|---|---|---|---|---|"]
         for label, rows in groups:
             if not rows:
-                lines.append(f"| {label} | 0 | 0 | — | — | — | — |")
+                lines.append(f"| {label} | 0 | 0 | — | — | — | — | — |")
                 continue
             rate = sum(r["runner"] for r in rows) / len(rows)
-            lines.append(f"| {label} | {len(rows)} | {len({r['tok'] for r in rows})} | {pct(rate)} | {rate / base_rate:.2f}× | {pct(median([r['gain'] for r in rows]))} | {sum(r['graduated'] for r in rows)} |")
+            ends = [r["end"] for r in rows if r.get("end") is not None]
+            lines.append(f"| {label} | {len(rows)} | {len({r['tok'] for r in rows})} | {pct(rate)} | {rate / base_rate:.2f}× | {pct(median([r['gain'] for r in rows]))} | {pct(median(ends))} | {sum(r['graduated'] for r in rows)} |")
         lines.append("")
         return lines
 
@@ -260,6 +265,14 @@ def main() -> int:
     md += table("By walk-forward wallet quality (mean past runner rate of the inflow wallets)", grp(q_bins))
     md += table("Combined rules", combos)
     md += table("First time a coin crosses inflow ≥ 8 (one row per coin)", [("all coins", fc), ("age < 1 h", [r for r in fc if r["age"] < 3600]), ("age < 1 h and not already +100%", [r for r in fc if r["age"] < 3600 and (r["momentum"] is None or r["momentum"] < 1.0)])])
+    md.append("## What the radar score takes from this")
+    md.append("")
+    md.append("- Inflow: lift rises through 20–39 wallets and falls at 40+, so the score plateaus at 20–40 and eases off above.")
+    md.append("- A fresh burst (acceleration ≥ 4) and breadth (many source coins) both carry lift; a slowing inflow (< 1) carries less.")
+    md.append("- Age: 15–60 min is the strongest bucket, under 15 min next; coins older than 1 h fall towards the base rate, older than 4 h below it.")
+    md.append("- Momentum: a coin already up 100% in the last 10 minutes is *more* likely to double again within the horizon (continuation), but its median price at +H is what the 'gain at +H' column shows: entering late and holding is a different bet from catching the move. The score keeps momentum neutral and shows it as a column.")
+    md.append("- Wallet quality: inflow from wallets whose earlier rotations preceded runners (0.5–0.65 bucket) roughly doubles the rate versus unknown wallets; the top bucket is small and noisier.")
+    md.append("")
     md.append("## Reading this honestly")
     md.append("")
     md.append("- Signal minutes are autocorrelated (a coin with inflow for 20 minutes contributes 20 rows). The per-coin table is the fairer count.")

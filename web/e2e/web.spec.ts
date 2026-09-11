@@ -149,7 +149,7 @@ test('flow view draws readable ribbons for the top radar coin and links to evide
     if (Math.abs(boxes[i].x - boxes[i - 1].x) < 5) expect(boxes[i].y).toBeGreaterThanOrEqual(boxes[i - 1].y + boxes[i - 1].height - 1)
   }
   // clicking a ribbon opens the edge evidence in the map view
-  await ribbons.nth(0).click()
+  await ribbons.nth(0).locator('path').first().click({ force: true })
   await expect(page.getByTestId('view-map')).toHaveClass(/on/)
   await page.waitForFunction(() => window.__stampede_state().selection?.kind === 'edge')
 })

@@ -50,7 +50,7 @@ FRAME_S = 0.2
 if frames:
     lst = OUT / "tui-frames.txt"
     lst.write_text("".join(f"file '{f}'\nduration {FRAME_S}\n" for f in frames[:20]) + f"file '{frames[min(19, len(frames) - 1)]}'\n")
-    caption(OUT / "cap-tui.png", f"TERMINAL  ·  stampede terminal  ·  RADAR screen (Tab)  ·  REPLAY {speed}×  ·  session {sid}", "Coins ranked by rotation inflow in the last 10 minutes; Enter opens the coin card. Caption added in post.")
+    caption(OUT / "cap-tui.png", f"TERMINAL  ·  stampede terminal  ·  feed, then Tab → RADAR screen  ·  REPLAY {speed}×  ·  session {sid}", "Radar: coins ranked by rotation inflow in the last 10 minutes; Enter opens the coin card. Caption added in post.")
     run(f"ffmpeg -v error -y -f concat -safe 0 -i '{lst}' -i '{OUT}/cap-tui.png' -filter_complex \"[0:v]scale=1440:-2,pad=1440:900:0:0:color=0x050505,format=yuv420p[v];[v][1:v]overlay=0:main_h-overlay_h\" -r 30 -c:v libx264 -crf 18 -pix_fmt yuv420p '{OUT}/seg-tui.mp4'")
 
 web_in = max(0.0, m["radar"] - 1.0)

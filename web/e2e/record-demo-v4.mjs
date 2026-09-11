@@ -53,7 +53,7 @@ await page.keyboard.press('Escape') // close the drawer so the flow is unobstruc
 await page.waitForTimeout(3200)
 mark('flow', `FLOW: where ${topSymbol}'s wallets came from and where they went; ribbon width = distinct wallets`)
 await shot('flow')
-await page.locator('.flow-svg .ribbon').nth(0).click()
+await page.locator('.flow-svg .ribbon').nth(0).locator('path').first().click({ force: true })
 await page.waitForFunction(() => window.__stampede_state().view === 'map' && window.__stampede_state().viewState !== 'overview', null, { timeout: 15000 }).catch(() => {})
 await page.waitForFunction(() => window.__stampede_state().viewState === 'evidence', null, { timeout: 12000 }).catch(() => {})
 await page.waitForTimeout(1200)

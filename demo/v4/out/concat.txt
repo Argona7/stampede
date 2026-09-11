@@ -1,0 +1,2 @@
+file '/Users/argona/dev/stampede/demo/v4/out/seg-tui.mp4'
+file '/Users/argona/dev/stampede/demo/v4/out/seg-web.mp4'

@@ -1,0 +1,3 @@
+session S-d40b66, replay 20x, clock start 17:22:57 UTC, top coin CAT·fd23
+web segment from 2.1s for 22.7s; marks: {"radar": 3.1, "play": 3.2, "drawer": 12.6, "flow": 15.9, "evidence": 20, "alerts": 23.9, "end": 24.8}
+cut: from 10.4s for 5.0s

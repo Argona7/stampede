@@ -41,3 +41,20 @@
 - Постоянный rAF-цикл: рендер не останавливается в простое (это помогло измерить frame times, но тратит CPU); нужен idle-stop.
 - В headless-записи Playwright видеопоток ~25 fps; это свойство записи, не продукта.
 - HyperSync-токен по-прежнему не подключён; ingest на Alchemy.
+
+
+# Приёмка этапа «RADAR: андеррадар-ранеры» (2026-09-11)
+
+| Проверка | Результат | Доказательство |
+|---|---|---|
+| Исследование R1 | Выполнено на 5 ч реальных данных (444 537 сделок, 9 596 монет, 38 059 direct/clean последовательностей, 44 graduation). База 5.30% монето-минут даёт ≥2× за 30 мин; inflow 20–39 кошельков за 10 мин — 21.6% (4.1×), ускорение ≥4 — 18.0% (3.4×), возраст 15–60 мин — 17.8%; правило «inflow ≥ 8, возраст < 1 ч, не +100% за 10 мин» — 20.2% (3.8×), с качеством кошельков ≥ 0.5 — 31.9% (6.0×), но медиана цены через 30 мин отрицательная (−25…−40%) | `docs/RESEARCH-RUNNERS.md`, `stampede/research/backtest.py`, `data/research-12h.sqlite` (5 ч, блоки 60018681–60198681) |
+| Качество кошельков R2 | Walk-forward: 3 559 кошельков со score (≥3 известных исходов) и bot-флагами, импорт в рабочую базу `stampede wallet-scores --from` | `wallet_scores` в `data/stampede.sqlite`; radar показывает `quality` и `quality_known` |
+| Модули M1–M4 | PONS lifecycle (launches/graduations из логов и on-demand), curve progress as-of, соцсети из calldata; GeckoTerminal; holders/dev по Transfer-истории; X mentions через twitterapi.io с бюджетом и кэшем | `stampede/context/*`, `tests/test_radar.py`; проверено на реальной монете (TruffleHog·7b08: threshold 8 090 USDG, progress 23%, dev продал 18.7%, X 0/22) |
+| Radar API | `/api/radar` (score c разбором, пресеты, фильтры, кэш 4 с, один расчёт на clock), `/api/coin/{t}`, `/api/alerts` | `tests/test_radar.py` (4), `web/e2e/web.spec.ts` (radar/flow) |
+| Web | RADAR (лидерборд, фильтры, пресеты, спарклайны, вспышки строк), FLOW (эго-сеть лентами, подписи без наложений), coin drawer, MAP c top-N потоков; клавиши 1/2/3, D, Esc | `web/src/components/{Radar,Flow,CoinDrawer}.tsx`, кадры `demo/v4/out/frame-*.png`, e2e 8 passed |
+| TUI | Экран Radar (Tab), пресеты u/g/s/a, карточка монеты (Enter), `r` обновить контекст | `demo/v4/tui/b-radar-*.png`, `tests/test_tui.py` |
+| Алерты | Правило v2 + журнал с исходами +30/+60 мин, macOS-уведомление по `--notify`; трек-рекорд честный (в записи 0/7 вверх через 30 мин при v1-правиле → правило пересобрано по бэктесту) | `/api/alerts`, кадр `demo/v4/out/frame-alerts.png` |
+| Регрессия | pytest 46 passed; Playwright 8 passed; build/lint чистые | этот запуск |
+| Демо v4 | 26.9 с walkthrough + 5 с cut, кадры, читаемость 720×450 проверена | `demo/v4/out/`, `docs/DEMO-V4.md` |
+
+Ограничения и открытые вопросы: внешний контекст (X, GeckoTerminal, holders) в replay не запрашивается — цифры «now» не смешиваются с часами replay; X-поиск по тикеру-слову ловит посторонние твиты (снижено запросом `$SYM OR адрес OR (SYM AND robinhood/pons)`); в исследовательской базе не разрешены названия токенов (только адреса) — на бэктест не влияет; 5 ч — первая мера, не закон: скрипт пересчитывает всё на новом диапазоне.

@@ -30,33 +30,31 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 # Score v2 shape, calibrated on docs/RESEARCH-RUNNERS.md buckets (see SCORE_NOTES). Weights are explicit so
 # the backtest can be re-run and the numbers changed in one place.
-SCORE_NOTES = "inflow has a sweet spot (8-19 wallets in 10 min measured highest lift; 40+ is late), a fresh burst (accel >= 4) and age < 15 min carry the most lift, a coin already up 100%+ in the last 10 min is crowded, and wallets whose past rotations preceded runners add lift."
+SCORE_NOTES = "inflow lift rises through 20-39 wallets in 10 min and drops at 40+; a fresh burst (accel >= 4), breadth and age < 1 h carry lift; wallets whose past rotations preceded runners roughly double the rate. Momentum is shown, not scored. Source: docs/RESEARCH-RUNNERS.md."
 
 
 def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str, chg_10m: float | None = None) -> dict[str, Any]:
-    # inflow: rises to the measured sweet spot, then eases off (the crowd is already in)
-    if inflow_10m <= 12:
-        s_inflow = inflow_10m / 12
-    elif inflow_10m <= 20:
+    # inflow: measured lift rises through 20-39 wallets and drops at 40+ (docs/RESEARCH-RUNNERS.md)
+    if inflow_10m <= 20:
+        s_inflow = inflow_10m / 20
+    elif inflow_10m <= 40:
         s_inflow = 1.0
     else:
-        s_inflow = max(0.35, 1.0 - (inflow_10m - 20) / 60)
+        s_inflow = max(0.5, 1.0 - (inflow_10m - 40) / 120)
     s_accel = _clamp(math.log1p(max(0.0, accel)) / math.log1p(20)) if accel >= 1 else 0.0
     s_breadth = _clamp(math.log1p(breadth) / math.log1p(12))
     s_quality = quality if quality is not None else 0.5
     attention = _clamp(math.log1p(mentions_1h) / math.log1p(200), 0, 0.6) if mentions_1h is not None else 0.0
     if age_s is None:
         age_bonus = 0.0
-    elif age_s < 900:
-        age_bonus = 0.14
     elif age_s < 3600:
-        age_bonus = 0.06
+        age_bonus = 0.12  # under 15 min and 15-60 min are the two strongest buckets
     elif age_s < 4 * 3600:
-        age_bonus = -0.06
+        age_bonus = -0.04
     else:
         age_bonus = -0.12
     stage_bonus = 0.05 if stage == "curve" else 0.0
-    crowded = -0.12 if (chg_10m is not None and chg_10m >= 100) else (0.03 if chg_10m is None else 0.0)
+    crowded = 0.0  # momentum is shown as a column, not scored: continuation and late entry are different bets
     total = 100 * _clamp(0.36 * s_inflow + 0.24 * s_accel + 0.12 * s_breadth + 0.18 * s_quality + age_bonus + stage_bonus + crowded - attention)
     return {
         "score": round(total, 1),
