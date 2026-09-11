@@ -60,6 +60,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--src", default=None, help="source store (default: STAMPEDE_DB / data/stampede.sqlite)")
     p.add_argument("--windows", default="1800", help="sequence windows to include, seconds, comma-separated")
 
+    p = sub.add_parser("backfill", help="days of PONS v2 history from HyperSync into a research store (needs HYPERSYNC_TOKEN)")
+    p.add_argument("--db", default="data/research-14d.sqlite")
+    p.add_argument("--days", type=float, default=14.0)
+    p.add_argument("--from-block", type=int, default=None)
+    p.add_argument("--to-block", type=int, default=None)
+    p.add_argument("--label", default=None)
+    p.add_argument("--no-resume", action="store_true", help="ignore the stored cursor and start over")
+    p.add_argument("--rotate", action="store_true", help="compute 5 min and 30 min sequences when the trades pass is done")
+
+    p = sub.add_parser("fx", help="USD rates of the quote assets (ETH hourly from CoinGecko, other pair tokens spot from GeckoTerminal) into fx_rates")
+    p.add_argument("--db", default=None)
+    p.add_argument("--days", type=float, default=14.0)
+
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8791)
@@ -111,6 +124,14 @@ def main(argv: list[str] | None = None) -> int:
         from .demo import main_demo
 
         return main_demo(args)
+    if args.cmd == "fx":
+        from .context.fx import main_fx
+
+        return main_fx(args)
+    if args.cmd == "backfill":
+        from .research.backfill import main_backfill
+
+        return main_backfill(args)
     if args.cmd == "terminal":
         from .tui.app import main_terminal
 

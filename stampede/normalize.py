@@ -97,6 +97,17 @@ class Trade:
     venue: str
     swap_logs: list[int]
     flags: list[str]
+    fee: int = 0  # curve fee (incl. snipe tax) or hook fee, quote units; raw integer
+    tax: int = 0  # creator tax, quote units for curve trades
+    snipe: int = 0  # the snipe-tax part of `fee` (SnipeTaxCharged in the same transaction)
+
+    def row(self, ts: int | None, exact: int) -> tuple:
+        """The `trades` INSERT row (see TRADE_COLUMNS); one place for every writer."""
+        return (self.tx_hash, self.block, ts, exact, self.token, self.wallet, self.side, str(self.token_amount), self.quote_token, str(self.quote_amount), self.venue, json.dumps(self.swap_logs), "transfer_net", json.dumps(self.flags), str(self.fee), str(self.tax), str(self.snipe))
+
+
+TRADE_COLUMNS = "tx_hash,block,ts,ts_exact,token,wallet,side,token_amount,quote_token,quote_amount,venue,swap_logs,attribution,flags,fee_raw,tax_raw,snipe_raw"
+TRADE_INSERT = f"INSERT OR IGNORE INTO trades({TRADE_COLUMNS}) VALUES({','.join('?' * len(TRADE_COLUMNS.split(',')))})"
 
 
 def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> tuple[list[Trade], list[tuple[str, str, str]]]:
@@ -105,6 +116,15 @@ def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> 
     swaps = [l for l in logs if l["kind"] in SWAP_KINDS]
     if not swaps:
         return [], notes
+    # money that is not a trade but belongs to one: snipe tax per curve, hook fees per pool (same transaction)
+    snipe_by_curve: dict[str, int] = defaultdict(int)
+    hook_fee_by_pool: dict[str, tuple[int, int]] = {}
+    for l in logs:
+        if l["kind"] == "snipe_tax":
+            snipe_by_curve[l["address"]] += chain.u256(l["data"], 0)
+        elif l["kind"] == "hook_fee" and l.get("topic1"):
+            f, t = hook_fee_by_pool.get(l["topic1"], (0, 0))
+            hook_fee_by_pool[l["topic1"]] = (f + chain.u256(l["data"], 1), t + chain.u256(l["data"], 2))
     # token -> swap events
     events: dict[str, list[dict]] = defaultdict(list)
     for l in swaps:
@@ -155,19 +175,36 @@ def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> 
         quote_tok = evs[0]["_quote"]
         venues = sorted({e["_venue"] for e in evs})
         ev_token_sign = 0
+        fee_amt = tax_amt = snipe_amt = 0
+        hook_pools_seen: set[str] = set()
         for e in evs:
             if e["kind"] == "curve_buy":
+                # CurveBuy(buyer, recipient, quoteIn, tokensOut, fee, tax): fee already includes the snipe tax
                 quote_amt += chain.u256(e["data"], 0)
+                fee_amt += chain.u256(e["data"], 2)
+                tax_amt += chain.u256(e["data"], 3)
+                snipe_amt += snipe_by_curve.pop(e["address"], 0)
                 ev_token_sign += 1
             elif e["kind"] == "curve_sell":
+                # CurveSell(seller, recipient, tokensIn, quoteOut, fee, tax)
                 quote_amt += chain.u256(e["data"], 1)
+                fee_amt += chain.u256(e["data"], 2)
+                tax_amt += chain.u256(e["data"], 3)
                 ev_token_sign -= 1
             else:
                 a0, a1 = chain.i128(e["data"], 0), chain.i128(e["data"], 1)
                 tok_amt, q_amt = (a0, a1) if token == e["_c0"] else (a1, a0)
                 quote_amt += abs(q_amt)
                 ev_token_sign += 1 if tok_amt > 0 else -1
+                pid = e.get("topic1") or ""
+                if pid in hook_fee_by_pool and pid not in hook_pools_seen:
+                    hf, ht = hook_fee_by_pool[pid]
+                    fee_amt += hf
+                    tax_amt += ht
+                    hook_pools_seen.add(pid)
         flags: list[str] = []
+        if hook_pools_seen:
+            flags.append("hook_fee_in_unspecified_currency")  # the hook takes its cut in the output currency, not always the quote
         if len(venues) > 1:
             flags.append("multi_venue")
         if len(evs) > 1:
@@ -201,7 +238,8 @@ def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> 
             if any(e["kind"] == "v4_swap" for e in evs):
                 ctx.v4_sign[f"{side}_event_sign_{'pos' if ev_token_sign > 0 else 'neg' if ev_token_sign < 0 else 'zero'}"] += 1
             q = quote_amt if not (buyer and seller) else 0
-            out.append(Trade(tx_hash, block, token, wallet, side, amt, quote_tok, q, venue, [l["log_index"] for l in evs], list(flags)))
+            # fees belong to the side the event describes; on a two-sided tx they are attributed to both rows unsplit (flagged)
+            out.append(Trade(tx_hash, block, token, wallet, side, amt, quote_tok, q, venue, [l["log_index"] for l in evs], list(flags), fee_amt, tax_amt, snipe_amt))
     return out, notes
 
 
@@ -249,13 +287,13 @@ def normalize(store: Store, reset: bool = False, rpc=None) -> dict[str, Any]:
         for t in trades:
             stats[f"trades_{t.side}"] += 1
             by_wallet[t.wallet].add(t.side)
-            rows.append((t.tx_hash, t.block, ts, exact, t.token, t.wallet, t.side, str(t.token_amount), t.quote_token, str(t.quote_amount), t.venue, json.dumps(t.swap_logs), "transfer_net", json.dumps(t.flags)))
+            rows.append(t.row(ts, exact))
         direct_pairs += sum(1 for s in by_wallet.values() if s == {"buy", "sell"})
         if len(rows) >= 5000:
-            store.db.executemany("INSERT OR IGNORE INTO trades(tx_hash,block,ts,ts_exact,token,wallet,side,token_amount,quote_token,quote_amount,venue,swap_logs,attribution,flags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            store.db.executemany(TRADE_INSERT, rows)
             store.db.executemany("INSERT OR IGNORE INTO tx_notes(tx_hash,token,note,detail) VALUES(?,?,?,?)", note_rows)
             rows, note_rows = [], []
-    store.db.executemany("INSERT OR IGNORE INTO trades(tx_hash,block,ts,ts_exact,token,wallet,side,token_amount,quote_token,quote_amount,venue,swap_logs,attribution,flags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    store.db.executemany(TRADE_INSERT, rows)
     store.db.executemany("INSERT OR IGNORE INTO tx_notes(tx_hash,token,note,detail) VALUES(?,?,?,?)", note_rows)
     store.commit()
     # learned pass-through addresses: remembered for transparency (they are excluded per transaction anyway)

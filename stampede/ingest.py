@@ -105,6 +105,7 @@ class Ingest:
             "logs_swap_other_v4_forks_dropped": 0,
             "logs_transfer_kept": 0,
             "logs_lifecycle_kept": 0,
+            "logs_side_kept": 0,
             "logs_transfer_seen": 0,
             "swap_txs": 0,
             "blocks_missing": [],
@@ -155,22 +156,25 @@ class Ingest:
     def _fetch_rpc(self, fr: int, to: int) -> None:
         if self.rpc.alchemy_url:
             # Alchemy: swaps + transfers in ONE topic filter, 10-block sub-ranges, 4 workers (~4 calls/s = free-tier CU cap)
-            logs, failed = self.rpc.get_logs_parallel(fr, to, topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER] + chain.LIFECYCLE_TOPICS], workers=self.workers)
+            topics = [chain.SWAP_TOPICS + [chain.T_TRANSFER] + chain.LIFECYCLE_TOPICS + chain.CURVE_SIDE_TOPICS]
+            logs, failed = self.rpc.get_logs_parallel(fr, to, topics=topics, workers=self.workers)
             for f in failed:
                 # retry each failed sub-range once, sequentially
                 try:
-                    logs.extend(self.rpc.get_logs(f[0], f[1], topics=[chain.SWAP_TOPICS + [chain.T_TRANSFER] + chain.LIFECYCLE_TOPICS]))
+                    logs.extend(self.rpc.get_logs(f[0], f[1], topics=topics))
                 except Exception as e:  # noqa: BLE001
                     self.stats["chunk_failures"] += 1
                     self.stats["blocks_missing"].append([f[0], f[1], redact(str(e))[:120]])
-            lifecycle = [l for l in logs if (l["topics"][0] in (chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED) and l["address"].lower() in (chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK)) or l["topics"][0] == chain.T_CURVE_COMPLETED]
+            lifecycle = [l for l in logs if (l["topics"][0] in (chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED, chain.T_LAUNCH_SWEPT, chain.T_POOL_GRADUATED) and l["address"].lower() in (chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK)) or l["topics"][0] == chain.T_CURVE_COMPLETED]
             swaps = self._keep_swaps([l for l in logs if l["topics"][0] in chain.SWAP_TOPICS])
             transfers = [l for l in logs if l["topics"][0] == chain.T_TRANSFER]
+            side = [l for l in logs if l["topics"][0] in chain.CURVE_SIDE_TOPICS]
             src = "alchemy"
         else:
             swaps = self._keep_swaps(self.rpc.get_logs(fr, to, topics=[chain.SWAP_TOPICS]))
             transfers = self.rpc.get_logs(fr, to, topics=[[chain.T_TRANSFER]])
             lifecycle = self.rpc.get_logs(fr, to, topics=[chain.LIFECYCLE_TOPICS])
+            side = self.rpc.get_logs(fr, to, topics=[chain.CURVE_SIDE_TOPICS])
             src = "public_rpc"
         # launch / graduation lifecycle events: kept regardless of swaps (a launch tx has no swap unless launchAndBuy)
         self.store.insert_logs(log_row(l, src) for l in lifecycle)
@@ -178,8 +182,11 @@ class Ingest:
         txs = {l["transactionHash"] for l in swaps}
         self.stats["logs_transfer_seen"] += len(transfers)
         keep_tr = [l for l in transfers if l["transactionHash"] in txs]
+        keep_side = [l for l in side if l["transactionHash"] in txs]  # snipe tax / hook fee rows of the same trades
         self.store.insert_logs(log_row(l, src) for l in swaps)
         self.store.insert_logs(log_row(l, src) for l in keep_tr)
+        self.store.insert_logs(log_row(l, src) for l in keep_side)
+        self.stats["logs_side_kept"] += len(keep_side)
         self.store.commit()
         self.stats["logs_swap_kept"] += len(swaps)
         self.stats["logs_transfer_kept"] += len(keep_tr)
@@ -190,7 +197,7 @@ class Ingest:
         logs, txs, blocks = self.hs.logs(fr, to, chain.SWAP_TOPICS)
         swaps = self._keep_swaps(logs, is_hs=True)
         tx_set = {l["transaction_hash"] for l in swaps}
-        tlogs, _, tblocks = self.hs.logs(fr, to, [chain.T_TRANSFER], join_tx=False)
+        tlogs, _, tblocks = self.hs.logs(fr, to, [chain.T_TRANSFER] + chain.CURVE_SIDE_TOPICS, join_tx=False)
         self.stats["logs_transfer_seen"] += len(tlogs)
         keep_tr = [l for l in tlogs if l["transaction_hash"] in tx_set]
         self.store.insert_logs(hs_log_row(l) for l in swaps)

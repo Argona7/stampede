@@ -18,7 +18,7 @@ from .. import chain
 from ..env import redact
 from ..hypersync import HyperSync
 from ..ingest import Ingest
-from ..normalize import Interp, build_context, trades_from_tx
+from ..normalize import TRADE_INSERT, Interp, build_context, trades_from_tx
 from ..rotation import T, sequences_for_wallet
 from ..rpc import Rpc
 from ..store import Store
@@ -151,9 +151,9 @@ class LiveTail(threading.Thread):
                     unknown += len(trades)
             for t in trades:
                 wallets.add(t.wallet)
-                rows.append((t.tx_hash, t.block, ts, exact, t.token, t.wallet, t.side, str(t.token_amount), t.quote_token, str(t.quote_amount), t.venue, json.dumps(t.swap_logs), "transfer_net", json.dumps(t.flags)))
+                rows.append(t.row(ts, exact))
         if rows:
-            store.db.executemany("INSERT OR IGNORE INTO trades(tx_hash,block,ts,ts_exact,token,wallet,side,token_amount,quote_token,quote_amount,venue,swap_logs,attribution,flags) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+            store.db.executemany(TRADE_INSERT, rows)
             store.db.executemany("INSERT INTO wallets(address,is_contract,trades) VALUES(?,NULL,1) ON CONFLICT(address) DO UPDATE SET trades=trades+1", [(r[5],) for r in rows])
         # Incremental pairing: only buys that arrived in this range can create new sequences (a new sell has no
         # later buy yet), and the grade of an older sequence never changes because time only moves forward.

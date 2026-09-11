@@ -10,6 +10,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "textual>=8.2.8",
+    "hypersync>=1.2.1",
 ]
 
 [project.scripts]

@@ -71,7 +71,16 @@ CREATE TABLE IF NOT EXISTS alerts (
   score REAL, inflow INTEGER, mentions_1h INTEGER, price REAL, detail TEXT,
   outcome_30m REAL, outcome_60m REAL, graduated_after INTEGER, outcome_checked_ts INTEGER);
 CREATE INDEX IF NOT EXISTS alerts_token ON alerts(token, created_ts);
+-- USD rates of quote assets (ETH, USDG, tokenized stocks) per hour; source names the feed, never a key
+CREATE TABLE IF NOT EXISTS fx_rates (token TEXT, ts_hour INTEGER, usd REAL, source TEXT, PRIMARY KEY (token, ts_hour));
 """
+
+# Additive migrations for stores created before a column existed: (table, column, type).
+MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("trades", "fee_raw", "TEXT"),  # curve fee (includes any snipe tax) or hook fee, raw integer string in quote units
+    ("trades", "tax_raw", "TEXT"),  # creator tax, raw integer string
+    ("trades", "snipe_raw", "TEXT"),  # snipe tax part of fee_raw (SnipeTaxCharged in the same tx), raw integer string
+)
 
 
 class Store:
@@ -82,6 +91,17 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        cols: dict[str, set[str]] = {}
+        for table, col, typ in MIGRATIONS:
+            if table not in cols:
+                cols[table] = {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+            if col not in cols[table]:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+                cols[table].add(col)
+        self.db.commit()
 
     # ---- meta / runs ----
     def set_meta(self, key: str, value: Any) -> None:
