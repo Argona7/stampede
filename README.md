@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests: 48 passing" src="https://img.shields.io/badge/tests-48%20passing-FF3344?style=flat-square&labelColor=050505">
+  <img alt="tests: 61 passing" src="https://img.shields.io/badge/tests-61%20passing-FF3344?style=flat-square&labelColor=050505">
   <img alt="python 3.13" src="https://img.shields.io/badge/python-3.13-A3A3A3?style=flat-square&labelColor=050505">
   <img alt="chain 4663 (Robinhood Chain)" src="https://img.shields.io/badge/chain-4663-A3A3A3?style=flat-square&labelColor=050505">
 </p>
@@ -123,7 +123,7 @@ ended below the alert price by the end of the horizon.
 ## Development
 
 ```sh
-uv sync && uv run pytest -q                     # 48 tests: normalization, rotation, radar, session, TUI, demo bundle
+uv sync && uv run pytest -q                     # 61 tests: normalization, rotation, radar, session, TUI, demo bundle
 cd web && npm ci && npm run build && npm run lint
 python scripts/serve_daemon.py start --mode replay   # serves data/stampede.sqlite on :8791 (own recorded store)
 cd web && npx playwright test                   # 8 end-to-end tests against the running server

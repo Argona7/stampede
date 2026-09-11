@@ -37,8 +37,9 @@ downloads the bundle from when `data/demo/` has none).
 
 ## Keys
 
-Terminal: `↑/↓` select, `Enter` open pair / coin card, `Esc` back, `/` filter, `End` follow tail, `Tab` feed/radar,
-`u g s a` radar presets, `r` refresh coin context, `space` play/pause, `←/→` seek 60 s, `[ ]` speed, `q` quit.
+Terminal: `↑/↓` select, `Enter` open evidence / coin card, `Esc` back (filter → summary → table), `Tab`/`Shift+Tab` panes,
+`1`/`2` FEED / RADAR screens, `/` search, `End`/`Home` follow latest / first row, `u g s a` radar presets, `r` refresh coin
+context, `space` play/pause, `←/→` seek 60 s, `[ ]` speed, `q` or `Ctrl+C` quit.
 
 Web: `1 2 3` RADAR / FLOW / MAP, click a row or a ribbon, `D` coin drawer, `E` evidence rows, `Esc` back,
 `P` presentation/explore (MAP), `T` tape, `A` autopilot, `space` play/pause. URL parameters: `?view=radar|flow|map`,
@@ -54,7 +55,7 @@ Web: `1 2 3` RADAR / FLOW / MAP, click a row or a ribbon, `D` coin drawer, `E` e
 
 ## Tests
 
-- `uv run pytest -q` — 48 tests: chain constants, normalization, rotation, radar score, shared session (TUI + API in
+- `uv run pytest -q` — 61 tests: chain constants, normalization, rotation, radar score, shared session (TUI + API in
   one process), TUI screens, the demo bundle (export, pack, unpack, boot without keys), one real recorded receipt.
 - `cd web && npx playwright test` — 8 end-to-end tests against a running replay server on :8791 (`playwright.config.ts`).
 - Headless Textual renders need `env -u NO_COLOR TEXTUAL_COLOR_SYSTEM=truecolor` in shells that set `NO_COLOR`.
