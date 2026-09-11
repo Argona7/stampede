@@ -7,6 +7,7 @@ export interface Filters {
   toTs: number | null
   minWallets: number
   showAmbiguous: boolean
+  limit: number // top-N edges drawn on the map (by distinct wallets)
 }
 
 interface Props {
@@ -97,6 +98,17 @@ export default function Controls({ status, graph, filters, setFilters, bounds, s
           <span>{filters.minWallets}</span>
         </div>
         <input type="range" min={1} max={20} value={filters.minWallets} aria-label="Minimum wallets per edge" onChange={(e) => setFilters({ ...filters, minWallets: Number(e.target.value) })} />
+        <div className="kv" style={{ marginTop: 6 }}>
+          <span>top flows drawn</span>
+          <span>{filters.limit}</span>
+        </div>
+        <div className="row">
+          {[25, 50, 100, 300].map((n) => (
+            <button key={n} className={filters.limit === n ? 'on' : ''} onClick={() => setFilters({ ...filters, limit: n })}>
+              {n}
+            </button>
+          ))}
+        </div>
         <label className="row" style={{ fontSize: 12, marginTop: 6 }}>
           <input type="checkbox" checked={filters.showAmbiguous} onChange={(e) => setFilters({ ...filters, showAmbiguous: e.target.checked })} />
           draw ambiguous-only edges (dashed)

@@ -218,7 +218,7 @@ export default function Radar({ data, alerts, session, filters, setFilters, sele
         <aside className="radar-alerts">
           <h2>Alerts · under-radar top-5</h2>
           <p className="faint">
-            Fires when a coin enters the top 5 with score ≥ {alerts?.rules?.under_radar_top5?.score_min ?? 60}, inflow ≥ {alerts?.rules?.under_radar_top5?.inflow_min ?? 8} and X mentions ≤ {alerts?.rules?.under_radar_top5?.mentions_max ?? 3} (or unknown). Outcome = price 30/60 min later on indexed trades.
+            Fires when a coin enters the top 5 with score ≥ {alerts?.rules?.under_radar_top5?.score_min ?? 60}, inflow {alerts?.rules?.under_radar_top5?.inflow_min ?? 8}–{alerts?.rules?.under_radar_top5?.inflow_max ?? 40} wallets in 10 min, age &lt; {Math.round((alerts?.rules?.under_radar_top5?.age_max_s ?? 3600) / 60)} min, not already +{alerts?.rules?.under_radar_top5?.chg_10m_max ?? 100}% in 10 min, X mentions ≤ {alerts?.rules?.under_radar_top5?.mentions_max ?? 3} (or unknown). Outcome = price 30/60 min later on indexed trades.
           </p>
           {trackRecord && (
             <div className="kv">
@@ -255,6 +255,7 @@ function scoreHint(r: RadarRow): string {
   const p = r.parts as Record<string, number | boolean>
   const bits = [`in ${p.inflow}`, `acc ${p.acceleration}`, `br ${p.breadth}`]
   if (p.quality_known) bits.push(`q ${p.wallet_quality}`)
+  if ((p.crowding as number) < 0) bits.push('crowded')
   if ((p.attention_penalty as number) < 0) bits.push(`x ${p.attention_penalty}`)
   return bits.join(' · ')
 }

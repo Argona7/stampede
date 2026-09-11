@@ -35,7 +35,7 @@ class ContextWorker(threading.Thread):
         self.top_n = top_n
         self.status: dict[str, Any] = {"running": False, "last_cycle": None, "last_error": None, "cycles": 0, "context_enabled": False, "alerts_fired": 0}
         self._stop = threading.Event()
-        self.rules = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8}}
+        self.rules = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}
 
     def stop(self) -> None:
         self._stop.set()
@@ -92,7 +92,11 @@ class ContextWorker(threading.Thread):
         for rank, r in enumerate(rad["rows"][: rule["rank_max"]], 1):
             m = mentions.get(r["address"])
             m1h = m.get("mentions_1h") if m else None
-            if r["score"] < rule["score_min"] or r["inflow_10m"] < rule["inflow_min"]:
+            if r["score"] < rule["score_min"] or r["inflow_10m"] < rule["inflow_min"] or r["inflow_10m"] > rule["inflow_max"]:
+                continue
+            if r.get("age_s") is None or r["age_s"] > rule["age_max_s"]:
+                continue
+            if r.get("chg_10m") is not None and r["chg_10m"] >= rule["chg_10m_max"]:
                 continue
             if m1h is not None and m1h > rule["mentions_max"]:
                 continue

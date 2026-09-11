@@ -28,25 +28,46 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
-def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str) -> dict[str, Any]:
-    # log scales so 80 wallets still ranks above 40 instead of both pinning at the cap
-    s_inflow = _clamp(math.log1p(inflow_10m) / math.log1p(150))
-    s_accel = _clamp(math.log1p(max(0.0, accel)) / math.log1p(60))
-    s_breadth = _clamp(math.log1p(breadth) / math.log1p(40))
+# Score v2 shape, calibrated on docs/RESEARCH-RUNNERS.md buckets (see SCORE_NOTES). Weights are explicit so
+# the backtest can be re-run and the numbers changed in one place.
+SCORE_NOTES = "inflow has a sweet spot (8-19 wallets in 10 min measured highest lift; 40+ is late), a fresh burst (accel >= 4) and age < 15 min carry the most lift, a coin already up 100%+ in the last 10 min is crowded, and wallets whose past rotations preceded runners add lift."
+
+
+def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str, chg_10m: float | None = None) -> dict[str, Any]:
+    # inflow: rises to the measured sweet spot, then eases off (the crowd is already in)
+    if inflow_10m <= 12:
+        s_inflow = inflow_10m / 12
+    elif inflow_10m <= 20:
+        s_inflow = 1.0
+    else:
+        s_inflow = max(0.35, 1.0 - (inflow_10m - 20) / 60)
+    s_accel = _clamp(math.log1p(max(0.0, accel)) / math.log1p(20)) if accel >= 1 else 0.0
+    s_breadth = _clamp(math.log1p(breadth) / math.log1p(12))
     s_quality = quality if quality is not None else 0.5
     attention = _clamp(math.log1p(mentions_1h) / math.log1p(200), 0, 0.6) if mentions_1h is not None else 0.0
-    age_bonus = 0.12 if (age_s is not None and age_s < 1800) else (0.06 if (age_s is not None and age_s < 2 * 3600) else 0.0)
-    stage_bonus = 0.06 if stage == "curve" else 0.0
-    total = 100 * _clamp(0.40 * s_inflow + 0.25 * s_accel + 0.15 * s_breadth + 0.20 * s_quality + age_bonus + stage_bonus - attention)
+    if age_s is None:
+        age_bonus = 0.0
+    elif age_s < 900:
+        age_bonus = 0.14
+    elif age_s < 3600:
+        age_bonus = 0.06
+    elif age_s < 4 * 3600:
+        age_bonus = -0.06
+    else:
+        age_bonus = -0.12
+    stage_bonus = 0.05 if stage == "curve" else 0.0
+    crowded = -0.12 if (chg_10m is not None and chg_10m >= 100) else (0.03 if chg_10m is None else 0.0)
+    total = 100 * _clamp(0.36 * s_inflow + 0.24 * s_accel + 0.12 * s_breadth + 0.18 * s_quality + age_bonus + stage_bonus + crowded - attention)
     return {
         "score": round(total, 1),
         "parts": {
-            "inflow": round(40 * s_inflow, 1),
-            "acceleration": round(25 * s_accel, 1),
-            "breadth": round(15 * s_breadth, 1),
-            "wallet_quality": round(20 * s_quality, 1),
+            "inflow": round(36 * s_inflow, 1),
+            "acceleration": round(24 * s_accel, 1),
+            "breadth": round(12 * s_breadth, 1),
+            "wallet_quality": round(18 * s_quality, 1),
             "age_bonus": round(100 * age_bonus, 1),
             "curve_bonus": round(100 * stage_bonus, 1),
+            "crowding": round(100 * crowded, 1),
             "attention_penalty": round(-100 * attention, 1),
             "quality_known": quality is not None,
             "mentions_known": mentions_1h is not None,
@@ -188,7 +209,8 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
         st = prog["stage"]
         mentions = (ctx.get("mentions") or {}).get(tok)
         m1h = mentions.get("mentions_1h") if mentions else None
-        sc = score(inflow10, accel, breadth, quality, m1h, age_s, st)
+        cs = stats_from_rows(hour_trades.get(tok, []), clock, qdec)
+        sc = score(inflow10, accel, breadth, quality, m1h, age_s, st, cs.get("chg_10m"))
         row = {
             **labels[tok],
             "inflow_10m": inflow10,
@@ -211,8 +233,8 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
             "mentions_24h": mentions.get("mentions_24h") if mentions else None,
             **sc,
         }
-        cs = stats_from_rows(hour_trades.get(tok, []), clock, qdec)
         row["price_quote"] = cs["price_quote"]
+        row["chg_10m"] = cs.get("chg_10m")
         row["quote_symbol"] = qsym.get(cs["quote"] or "", None)
         row["chg_5m"] = cs["chg_5m"]
         row["chg_1h"] = cs["chg_1h"]
@@ -243,12 +265,15 @@ def stats_from_rows(rows: list[tuple], as_of_ts: int, quote_decimals: dict[str, 
     last = med(rows[-5:])
     win5 = [r for r in rows if r[0] >= as_of_ts - 300]
     p5 = med(win5[:5]) if win5 else None
+    before10 = [r for r in rows if r[0] <= as_of_ts - 600]
+    p10 = med(before10[-5:]) if before10 else None
     p60 = med(rows[:5])
     buyers = {r[5] for r in rows if r[1] == "buy"}
     return {
         "price_quote": last,
         "quote": qt,
         "chg_5m": ((last / p5 - 1) * 100) if p5 and last else None,
+        "chg_10m": ((last / p10 - 1) * 100) if p10 and last else None,
         "chg_1h": ((last / p60 - 1) * 100) if p60 and last else None,
         "vol_1h_quote": sum(r[3] for r in rows) / (10**dec),
         "trades_1h": len(rows),

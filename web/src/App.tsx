@@ -28,7 +28,7 @@ export default function App() {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [session, setSession] = useState<SessionState | null>(null)
   const [graph, setGraph] = useState<Graph | null>(null)
-  const [filters, setFilters] = useState<Filters>({ windowS: 1800, spanS: 1800, toTs: null, minWallets: 3, showAmbiguous: false })
+  const [filters, setFilters] = useState<Filters>({ windowS: 1800, spanS: 1800, toTs: null, minWallets: 3, showAmbiguous: false, limit: Number(params.get('top') ?? 300) })
   const [selection, setSelection] = useState<Selection>(null)
   const [hover, setHover] = useState<Selection>(null)
   const [edge, setEdge] = useState<EdgeDetail | null>(null)
@@ -132,7 +132,7 @@ export default function App() {
       if (inFlight.current) return
       inFlight.current = true
       api
-        .graph(filters.windowS, fromTs, toTs, filters.minWallets, 300)
+        .graph(filters.windowS, fromTs, toTs, filters.minWallets, filters.limit)
         .then((g) => alive && setGraph(g))
         .catch(() => {})
         .finally(() => {
@@ -143,7 +143,7 @@ export default function App() {
       alive = false
       window.clearTimeout(t)
     }
-  }, [filters.windowS, filters.minWallets, fromTs, toTs])
+  }, [filters.windowS, filters.minWallets, filters.limit, fromTs, toTs])
 
   // ---- event stream: history after a seek, new events otherwise (pulses only for new) ----
   useEffect(() => {

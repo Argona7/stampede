@@ -211,11 +211,19 @@ class Rpc:
         tag = number if isinstance(number, str) else hex(number)
         return self.call("eth_getBlockByNumber", [tag, full], prefer=prefer)
 
-    def get_blocks(self, numbers: list[int], prefer: str = "alchemy") -> dict[int, dict]:
+    def get_blocks(self, numbers: list[int], prefer: str = "alchemy", size: int = 50) -> dict[int, dict]:
+        """Block headers in batches; a rate-limited batch is retried after a pause instead of aborting the job."""
         out: dict[int, dict] = {}
-        for i in range(0, len(numbers), 100):
-            chunk = numbers[i : i + 100]
-            res = self.batch([("eth_getBlockByNumber", [hex(n), False]) for n in chunk], prefer=prefer)
+        for i in range(0, len(numbers), size):
+            chunk = numbers[i : i + size]
+            for attempt in range(6):
+                try:
+                    res = self.batch([("eth_getBlockByNumber", [hex(n), False]) for n in chunk], prefer=prefer)
+                    break
+                except RuntimeError as e:
+                    if attempt == 5:
+                        raise
+                    time.sleep(2.0 * (attempt + 1) if "429" in str(e) else 1.0)
             for n, r in zip(chunk, res):
                 if isinstance(r, dict):
                     out[n] = r

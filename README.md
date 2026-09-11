@@ -11,8 +11,14 @@ What an edge is **not**: it is not proof that the money from the sale funded the
 that several addresses share an owner, not a prediction, and not a buy signal.
 
 Two surfaces read one server and one shared replay clock: a full-screen **terminal UI** (`stampede
-terminal`) and a **web scene** (2D explorer plus a WebGL 3D presentation mode). Black / red / neutral
-text; red marks the brand, the selected route and newly observed sequences only.
+terminal`, Feed and Radar screens) and a **web app** with three views: **RADAR** (coins ranked by what
+wallets are rotating into right now, with filters, presets, context and an alert journal), **FLOW** (the
+ego network of one coin: where its wallets came from and where they went) and **MAP** (the 2D/3D scene).
+Black / red / neutral text; red marks the brand, the selected route and newly observed sequences only.
+
+The radar score, presets, context modules (PONS lifecycle, GeckoTerminal, holders, X mentions) and the
+alert rule are documented in `docs/RADAR.md`; the measurement behind the thresholds is
+`docs/RESEARCH-RUNNERS.md` (`python -m stampede.research.backtest`).
 
 Status: working prototype on one explicitly bounded sample (PONS v2 launchpad, 60 minutes). Not
 published anywhere; no token; nothing is sent to the chain.
@@ -53,13 +59,23 @@ Modes: `fixture` serves the recorded sample as a static snapshot; `replay` plays
 server-side clock shared by every client (`/api/session`: play, pause, seek, speed); `live` tails the
 chain head (measured head lag 2–5 s) and shows a provider error instead of a frozen "live" picture.
 
-Terminal keys: `↑/↓` select, `Enter` open pair, `Esc` back, `/` filter, `End` follow tail, `space`
-play/pause, `←/→` seek 60 s, `[ ]` speed, `q` quit. Web keys: click a line or a coin, `E` evidence rows,
-`Esc` overview, `P` presentation/explore, `T` tape, `space` play/pause.
+Terminal keys: `↑/↓` select, `Enter` open pair / coin card, `Esc` back, `/` filter, `End` follow tail,
+`Tab` feed/radar, `u g s a` radar presets, `r` refresh coin context, `space` play/pause, `←/→` seek 60 s,
+`[ ]` speed, `q` quit. Web keys: `1 2 3` RADAR / FLOW / MAP, click a row or a ribbon, `D` coin drawer,
+`E` evidence rows, `Esc` back, `P` presentation/explore (MAP), `T` tape, `space` play/pause.
+
+External context (X mentions via twitterapi.io, GeckoTerminal market, holders via public RPC) is fetched
+in live mode only by default (`serve --context live|always|off`); `--notify` posts macOS notifications
+when the under-radar alert rule fires. Optional `.env` key: `TWITTERAPI_KEY`.
 
 API: `/api/status` (scopes: fixed sample vs whole store), `/api/session` (shared clock), `/api/events`
 (observed sequences with stable ids and a cursor; `history` after a seek, `new` afterwards),
-`/api/graph`, `/api/edge/{a}/{b}`, `/api/token/{t}`, `/api/search`.
+`/api/radar` (ranked coins, score parts, presets, filters), `/api/coin/{t}` (everything about one coin;
+`?refresh=1` fetches live context), `/api/alerts` (journal + track record), `/api/graph`,
+`/api/edge/{a}/{b}`, `/api/token/{t}`, `/api/search`.
+
+Research: `python -m stampede.research.backtest --db <store> --out docs/RESEARCH-RUNNERS.md --write-scores`
+then `uv run stampede wallet-scores --from <store>` to load wallet quality into the serving store.
 
 Tests: `uv run pytest -q` (41) and, with the replay server running, `cd web && npx playwright test` (6).
 
@@ -67,7 +83,9 @@ Tests: `uv run pytest -q` (41) and, with the replay server running, `cd web && n
 
 ```
 stampede/          Python package: chain constants, RPC client, ingest, normalize, rotation, coverage, API
-stampede/api/      FastAPI app, queries, shared session clock, event stream, live tail
+stampede/api/      FastAPI app, queries, shared session clock, event stream, live tail, radar, context worker + alerts
+stampede/context/  PONS lifecycle, GeckoTerminal market, X mentions, holders (cached external context)
+stampede/research/ runner backtest (walk-forward), wallet scores
 stampede/tui/      Textual terminal UI (stampede terminal)
 web/               Vite + React + TypeScript: strip, 2D explorer, WebGL 3D scene, presentation layout
 web/e2e/           Playwright tests and recording scripts
