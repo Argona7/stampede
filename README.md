@@ -17,6 +17,9 @@ ranked board, a flow diagram and a spatial map — always with the addresses, ti
 hashes behind every number. It does not claim that the sale funded the purchase, that addresses share an
 owner, or that anything will happen next.
 
+**[Start here — step-by-step setup](docs/GETTING-STARTED.md)** — from an empty Terminal to your first observed
+sell → buy sequence and its transactions, on the recorded sample, with no API keys.
+
 [Quickstart](#quickstart) · [Watch demo](#watch-demo) · [How it works](#how-it-works) · [Data & limits](#data--limits)
 
 ## Watch demo
@@ -29,35 +32,28 @@ RADAR, FLOW): [`stampede-v5-autopilot.mp4`](https://github.com/Argona7/stampede/
 
 ## Quickstart
 
-The release ships a recorded sample: 60 minutes of PONS v2 trading on Robinhood Chain
+The release ships a recorded sample — 60 minutes of PONS v2 trading on Robinhood Chain
 (2026-09-10 16:29:57–17:29:57 UTC), 146,329 trades, 33,743 wallets, 12,164 observed sequences in the
-30-minute window. Replaying it needs no Alchemy, Twitter or other API key.
-
-Requirements: Python 3.13 with [uv](https://docs.astral.sh/uv/); Node 22+ only if you want the web views
-(the terminal UI runs on the API alone). Download: on first start `stampede demo` fetches the 17 MB sample bundle
-from the [v0.1.0 release](https://github.com/Argona7/stampede/releases/tag/v0.1.0) into `data/demo/` and unpacks
-it to 139 MB in `data/demo.sqlite`.
+30-minute window — and replaying it needs no Alchemy, Twitter or other API key. Requirements: Git,
+[uv](https://docs.astral.sh/uv/) (it installs Python 3.13 itself), Node 22+ only for the web views.
 
 ```sh
 git clone https://github.com/Argona7/stampede && cd stampede
 uv sync
 cd web && npm ci && npm run build && cd ..      # web views; skip for terminal-only
-uv run stampede demo                            # http://127.0.0.1:8791/  (replay 20x, paused)
+uv run stampede demo                            # fetches the 17 MB sample once, then http://127.0.0.1:8791/  (replay 20x, paused)
 ```
 
-In a second terminal (120×36 or larger; Terminal.app, iTerm, kitty, WezTerm all work):
+Press `Play` (or `space`) in the browser. Terminal UI in a second window (120×36 or larger), on the same clock:
+`uv run stampede terminal --api-url http://127.0.0.1:8791`. First time here? The
+[step-by-step guide](docs/GETTING-STARTED.md) explains each command, what you should see, and what to do when
+something goes wrong.
 
-```sh
-uv run stampede terminal --api-url http://127.0.0.1:8791
-```
-
-Press `space` to start the replay in either surface; both read the same server clock, so a seek in the
-browser moves the terminal too. Offline or mirrored setups: put `stampede-demo.sqlite.xz` into `data/demo/`
-yourself, or point `--bundle-url` / `STAMPEDE_DEMO_URL` at another copy.
-
-Live mode tails the chain head and needs an Alchemy key: copy `.env.example` to `.env`, fill `ALCHEMY_KEY`,
-then `uv run stampede serve --mode live`. `TWITTERAPI_KEY` is optional and only feeds the X-mentions column.
-Keys are read from `.env` only and never printed.
+The sample bundle comes from the [v0.1.0 release](https://github.com/Argona7/stampede/releases/tag/v0.1.0)
+(`data/demo/`, unpacked to 139 MB in `data/demo.sqlite`); offline or mirrored setups put `stampede-demo.sqlite.xz`
+there themselves or point `--bundle-url` / `STAMPEDE_DEMO_URL` at another copy. Live mode (Alchemy key in `.env`,
+`uv run stampede serve --mode live`) is documented in [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md); keys are read
+from `.env` only and never printed.
 
 ## Four views, one dataset
 
