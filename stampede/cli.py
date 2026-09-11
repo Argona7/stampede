@@ -47,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("repair-ts", help="fetch block headers for trades whose timestamp is unknown (0/NULL) and fix them")
     p.add_argument("--limit", type=int, default=20000)
 
+    p = sub.add_parser("wallet-scores", help="copy wallet_scores (walk-forward runner rates, bot flags) from a research store into this store")
+    p.add_argument("--from", dest="src", required=True, help="research sqlite produced by stampede.research.backtest --write-scores")
+
+    p = sub.add_parser("sync-lifecycle", help="parse indexed TokenLaunched / PoolRegistered logs into launches and graduations")
+
     p = sub.add_parser("export-fixture", help="export the current sample as a static JSON fixture for the UI")
     p.add_argument("--out", default="web/public/fixture.json")
     p.add_argument("--window", default="30m")
@@ -94,6 +99,22 @@ def main(argv: list[str] | None = None) -> int:
         from .normalize import main_repair_ts
 
         return main_repair_ts(args)
+    if args.cmd == "wallet-scores":
+        from .store import Store
+
+        src = Store(args.src)
+        rows = src.db.execute("SELECT wallet, rotations, runner_hits, score, is_bot, trades_per_hour, updated_at FROM wallet_scores").fetchall()
+        dst = Store()
+        dst.db.executemany("INSERT OR REPLACE INTO wallet_scores(wallet, rotations, runner_hits, score, is_bot, trades_per_hour, updated_at) VALUES(?,?,?,?,?,?,?)", rows)
+        dst.commit()
+        print(f"copied {len(rows)} wallet scores into {dst.path}")
+        return 0
+    if args.cmd == "sync-lifecycle":
+        from .context.pons import sync_lifecycle
+        from .store import Store
+
+        print(sync_lifecycle(Store()))
+        return 0
     return 1
 
 

@@ -333,6 +333,7 @@ export default function Scene3D(p: Props) {
       const hov = s.hover?.kind === 'token' ? s.hover.address : null
       const vs = propsRef.current.viewState
       // which nodes get a label
+      const bigPos = new Map<string, { x: number; y: number; rpx: number }>()
       const want = new Map<string, 'big' | 'small'>()
       for (const id of selNodes) want.set(id, 'big')
       if (hov && !want.has(hov)) want.set(hov, 'small')
@@ -379,6 +380,21 @@ export default function Scene3D(p: Props) {
         if (el.className !== cls) el.className = cls
         const txt = kind === 'big' ? `<span class="role">${role}</span><span class="sym">${n.symbol}</span><span class="addr">${n.short}</span>` : `<span class="sym">${n.symbol}</span>`
         if (el.innerHTML !== txt) el.innerHTML = txt
+        if (kind === 'big') bigPos.set(id, { x, y, rpx })
+      }
+      // the two pair labels must never overlap: if B's label would sit on A's, flip it above its node
+      if (sel?.kind === 'edge' && bigPos.has(sel.from) && bigPos.has(sel.to)) {
+        const ea = s.labelEls.get(sel.from)
+        const eb = s.labelEls.get(sel.to)
+        if (ea && eb) {
+          const ra = ea.getBoundingClientRect()
+          const rb = eb.getBoundingClientRect()
+          const overlap = !(ra.right < rb.left || rb.right < ra.left || ra.bottom < rb.top || rb.bottom < ra.top)
+          if (overlap) {
+            const pb = bigPos.get(sel.to)!
+            eb.style.transform = `translate(-50%, -100%) translate(${pb.x.toFixed(1)}px, ${(pb.y - pb.rpx * 1.4 - 6).toFixed(1)}px)`
+          }
+        }
       }
     }
     ;(st.current as unknown as { loop: () => void }).loop = loop

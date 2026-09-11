@@ -52,7 +52,8 @@ class ContextWorker(threading.Thread):
                 enabled = self.policy == "always" or (self.policy == "live" and self.mode == "live")
                 self.status["context_enabled"] = enabled
                 if clock is not None:
-                    rad = radar_mod.radar(store, self.window_s, clock, self.span_s, min_wallets=2, exclude_bots=True, limit=self.top_n)
+                    rows = radar_mod.rows_with_context(store, self.window_s, clock, self.span_s, True, self.mode == "live")
+                    rad = radar_mod.radar(store, self.window_s, clock, self.span_s, min_wallets=2, exclude_bots=True, limit=self.top_n, rows=rows)
                     rows = rad["rows"]
                     if enabled and rows:
                         if rpc is None:

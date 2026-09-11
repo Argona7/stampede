@@ -74,9 +74,9 @@ def events(store: Store, window_s: int, until: int, after: str | None, limit: in
         rows = q(
             f"""SELECT s.id, s.buy_ts, s.wallet, s.sell_token, s.buy_token, s.grade, s.gap_s, tb.tx_hash, ts.tx_hash, tb.ts_exact, ts.ts
                 FROM sequences s JOIN trades tb ON tb.id=s.buy_trade JOIN trades ts ON ts.id=s.sell_trade
-                WHERE s.window_s=? AND s.grade IN ({gl}) AND s.buy_ts<=? AND (s.buy_ts>? OR (s.buy_ts=? AND s.id>?))
+                WHERE s.window_s=? AND s.buy_ts>=? AND s.buy_ts<=? AND s.grade IN ({gl}) AND NOT (s.buy_ts=? AND s.id<=?)
                 ORDER BY s.buy_ts, s.id LIMIT ?""",
-            (window_s, *grades, until, cur[0], cur[0], cur[1], limit + 1),
+            (window_s, cur[0], until, *grades, cur[0], cur[1], limit + 1),
         ).fetchall()
         kind = "new"
     else:

@@ -207,7 +207,10 @@ export default function App() {
   useEffect(() => {
     if (view === 'map') return
     let alive = true
+    let busy = false
     const tick = () => {
+      if (busy) return
+      busy = true
       const f = radarFilters
       api
         .radar({ preset: f.preset !== 'custom' ? f.preset : null, min_wallets: f.minWallets, age_max: f.ageMax, stage: f.stage, exclude_bots: f.excludeBots ? 1 : 0, mentions_max: f.mentionsMax, quality_min: f.qualityMin, sort: f.sort, limit: 60 })
@@ -224,6 +227,9 @@ export default function App() {
           setRadarData(d)
         })
         .catch(() => {})
+        .finally(() => {
+          busy = false
+        })
       api.alerts().then((a) => alive && setAlerts(a)).catch(() => {})
     }
     tick()

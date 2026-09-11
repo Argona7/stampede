@@ -25,7 +25,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('strip reflects the shared session and the scene renders', async ({ page }) => {
-  await page.goto('/?layout=presentation')
+  await page.goto('/?layout=presentation&view=map')
   await expect(page.locator('.badge')).toContainText(/REPLAY/)
   await expect(page.locator('.scene3d canvas')).toBeVisible()
   await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
@@ -36,7 +36,7 @@ test('strip reflects the shared session and the scene renders', async ({ page })
 })
 
 test('selecting an edge flies to it and the caption shows the computed wallet count', async ({ page }) => {
-  await page.goto('/?layout=presentation')
+  await page.goto('/?layout=presentation&view=map')
   await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
   const { edge, session } = await topEdge(page)
   const detail = await (await page.request.get(`/api/edge/${edge.from}/${edge.to}?window=${session.window_s}s&from=${session.clock_ts - session.span_s}&to=${session.clock_ts}&exact=0`)).json()
@@ -62,7 +62,7 @@ test('selecting an edge flies to it and the caption shows the computed wallet co
 })
 
 test('pause adds no events and a repeated snapshot changes no counts', async ({ page }) => {
-  await page.goto('/?layout=presentation')
+  await page.goto('/?layout=presentation&view=map')
   await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
   const before = await page.evaluate(() => window.__stampede_state())
   await page.waitForTimeout(4000)
@@ -73,7 +73,7 @@ test('pause adds no events and a repeated snapshot changes no counts', async ({ 
 })
 
 test('play produces pulses that stop on pause; seek does not replay history as fresh', async ({ page }) => {
-  await page.goto('/?layout=presentation')
+  await page.goto('/?layout=presentation&view=map')
   await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
   await post(page, { action: 'speed', speed: 10 })
   await post(page, { action: 'play' })
@@ -89,17 +89,67 @@ test('play produces pulses that stop on pause; seek does not replay history as f
 })
 
 test('2D fallback renderer is available', async ({ page }) => {
-  await page.goto('/?renderer=2d')
+  await page.goto('/?renderer=2d&view=map')
   await expect(page.locator('.map-wrap canvas')).toBeVisible()
   await page.getByRole('button', { name: 'Toggle renderer' }).click()
   await expect(page.locator('.scene3d canvas')).toBeVisible()
 })
 
 test('explore layout keeps rails, details and ticker', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/?view=map')
   await expect(page.locator('.rail')).toBeVisible()
   await expect(page.locator('.detail')).toContainText('Nothing selected')
   await expect(page.locator('.ticker')).toBeVisible()
   await page.getByTestId('layout-toggle').click()
   await expect(page.locator('.rail')).toHaveCount(0)
+})
+
+test('radar view ranks coins, opens the coin drawer, presets and keys work', async ({ page }) => {
+  await page.goto('/?view=radar')
+  await expect(page.getByTestId('view-radar')).toHaveClass(/on/)
+  await page.waitForSelector('.radar-row:not(.head)', { timeout: 20000 })
+  const rows = page.locator('.radar-row:not(.head)')
+  expect(await rows.count()).toBeGreaterThan(3)
+  // scores descend under the default sort
+  const s0 = Number(await rows.nth(0).locator('.score b').textContent())
+  const s1 = Number(await rows.nth(1).locator('.score b').textContent())
+  expect(s0).toBeGreaterThanOrEqual(s1)
+  // every row shows inflow, at least one source chip and an age
+  await expect(rows.nth(0).locator('.inflow b')).not.toHaveText('')
+  expect(await rows.nth(0).locator('.sources em').count()).toBeGreaterThan(0)
+  // drawer
+  await rows.nth(0).click()
+  await expect(page.locator('.coin-drawer h1')).not.toHaveText('Loading…', { timeout: 15000 })
+  await expect(page.locator('.coin-drawer')).toContainText('On-chain')
+  await expect(page.locator('.coin-drawer')).toContainText('wallets came from')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.coin-drawer')).toHaveCount(0)
+  // preset switch changes the request (graduating sorts by progress) and the header label
+  await page.getByRole('button', { name: 'graduating' }).click()
+  await expect(page.locator('.presets button.on')).toHaveText(/graduating/)
+  // keys switch views
+  await page.keyboard.press('3')
+  await expect(page.getByTestId('view-map')).toHaveClass(/on/)
+  await page.keyboard.press('1')
+  await expect(page.getByTestId('view-radar')).toHaveClass(/on/)
+})
+
+test('flow view draws readable ribbons for the top radar coin and links to evidence', async ({ page }) => {
+  await page.goto('/?view=radar')
+  await page.waitForSelector('.radar-row:not(.head)', { timeout: 20000 })
+  await page.locator('.radar-row:not(.head)').nth(0).locator('.actions button').click()
+  await expect(page.getByTestId('view-flow')).toHaveClass(/on/)
+  await page.waitForSelector('.flow-svg .ribbon', { timeout: 15000 })
+  const ribbons = page.locator('.flow-svg .ribbon')
+  expect(await ribbons.count()).toBeGreaterThan(0)
+  await expect(page.locator('.flow-head')).toContainText('wallets rotated')
+  // source labels do not overlap: boxes are stacked with gaps
+  const boxes = await page.locator('.flow-svg .src rect').evaluateAll((els) => els.map((e) => e.getBoundingClientRect()).sort((a, b) => a.y - b.y))
+  for (let i = 1; i < boxes.length; i++) {
+    if (Math.abs(boxes[i].x - boxes[i - 1].x) < 5) expect(boxes[i].y).toBeGreaterThanOrEqual(boxes[i - 1].y + boxes[i - 1].height - 1)
+  }
+  // clicking a ribbon opens the edge evidence in the map view
+  await ribbons.nth(0).click()
+  await expect(page.getByTestId('view-map')).toHaveClass(/on/)
+  await page.waitForFunction(() => window.__stampede_state().selection?.kind === 'edge')
 })

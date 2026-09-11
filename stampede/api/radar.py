@@ -69,8 +69,52 @@ def radar(
     sort: str = "score",
     limit: int = 50,
     context: dict[str, Any] | None = None,
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """One row per coin with rotation inflow in (clock - span, clock]. Inflow windows: last 10 min vs the 20 min before."""
+    """One row per coin with rotation inflow in (clock - span, clock]; then filter + sort.
+    Pass precomputed `rows` (from compute_rows) to avoid recomputing when only filters change."""
+    base = rows if rows is not None else compute_rows(store, window_s, clock, span_s, exclude_bots, context)
+    out = []
+    for row in base:
+        if row["wallets_range"] < min_wallets:
+            continue
+        if age_max_s is not None and (row["age_s"] is None or row["age_s"] > age_max_s):
+            continue
+        if stage and row["stage"] != stage:
+            continue
+        if quality_min is not None and (row["quality"] is None or row["quality"] < quality_min):
+            continue
+        if mentions_max is not None and row["mentions_1h"] is not None and row["mentions_1h"] > mentions_max:
+            continue
+        if progress_min is not None and (row["progress"] is None or row["progress"] < progress_min):
+            continue
+        out.append(row)
+    key = {
+        "score": lambda r: -r["score"],
+        "inflow": lambda r: -r["inflow_10m"],
+        "accel": lambda r: -r["accel"],
+        "quality": lambda r: -(r["quality"] or 0),
+        "progress": lambda r: -(r["progress"] or 0),
+        "age": lambda r: (r["age_s"] if r["age_s"] is not None else 10**9),
+        "mentions": lambda r: (r["mentions_1h"] if r["mentions_1h"] is not None else 10**9),
+    }.get(sort, lambda r: -r["score"])
+    out.sort(key=key)
+    bots = store.db.execute("SELECT COUNT(*) FROM wallet_scores WHERE is_bot=1").fetchone()[0] if exclude_bots else 0
+    known = store.db.execute("SELECT COUNT(*) FROM wallet_scores WHERE score IS NOT NULL").fetchone()[0]
+    return {"clock": clock, "window_s": window_s, "span_s": span_s, "rows": out[:limit], "total": len(out), "presets": PRESETS, "bots_excluded": bots, "wallet_scores_known": known, "computed_at": time.time()}
+
+
+def rows_with_context(store: Store, window_s: int, clock: int, span_s: int, exclude_bots: bool, live: bool) -> list[dict[str, Any]]:
+    """compute_rows with the cached external context of every candidate coin attached (no fetching)."""
+    from .context_worker import load_context
+
+    toks = [r[0] for r in store.db.execute("SELECT DISTINCT buy_token FROM sequences WHERE window_s=? AND grade IN ('direct','clean') AND buy_ts>? AND buy_ts<=?", (window_s, clock - span_s, clock))]
+    ctx = {"mentions": load_context(store, "mentions", toks), "market": load_context(store, "market", toks) if live else {}, "holders": load_context(store, "holders", toks)}
+    return compute_rows(store, window_s, clock, span_s, exclude_bots, ctx)
+
+
+def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, exclude_bots: bool = True, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Unfiltered radar rows (every coin with rotation inflow in range). This is the expensive part; cache it per clock."""
     q = store.db.execute
     lo = clock - span_s
     t10 = clock - 600
@@ -99,30 +143,48 @@ def radar(
         else:
             d["wprev"].add(w)
     if not per:
-        return {"clock": clock, "window_s": window_s, "span_s": span_s, "rows": [], "total": 0, "presets": PRESETS}
+        return []
     labels = queries.token_labels(store, set(per) | {s for d in per.values() for s in d["src10"]})
     qdec = {r[0]: r[1] for r in q("SELECT address, decimals FROM quotes")}
     qsym = {r[0]: r[1] for r in q("SELECT address, symbol FROM quotes")}
     ctx = context or {}
+    toks = list(per)
+    # batched per-coin facts (one query each instead of several per coin)
+    launches: dict[str, dict[str, Any]] = {}
+    grads: dict[str, dict[str, Any]] = {}
+    first_ts: dict[str, int] = {}
+    net_quote: dict[str, float] = {}
+    hour_trades: dict[str, list[tuple]] = {t: [] for t in toks}
+    for i in range(0, len(toks), 400):
+        chunk = toks[i : i + 400]
+        ph = ",".join("?" * len(chunk))
+        for r in q(f"SELECT token, curve, deployer, pair_token, threshold, block, ts FROM launches WHERE token IN ({ph})", chunk):
+            launches[r[0]] = {"curve": r[1], "deployer": r[2], "pair_token": r[3], "threshold": int(r[4]) if r[4] else None, "block": r[5], "ts": r[6]}
+        for r in q(f"SELECT token, stage, ts, tx_hash FROM graduations WHERE token IN ({ph}) AND ts IS NOT NULL AND ts<=?", chunk + [clock]):
+            grads[r[0]] = {"stage": r[1], "ts": r[2], "tx_hash": r[3]}
+        for r in q(f"SELECT token, MIN(ts) FROM trades WHERE token IN ({ph}) AND ts>0 GROUP BY token", chunk):
+            first_ts[r[0]] = r[1]
+        for r in q(f"SELECT token, COALESCE(SUM(CASE WHEN side='buy' THEN CAST(quote_amount AS REAL) ELSE -CAST(quote_amount AS REAL) END),0) FROM trades WHERE token IN ({ph}) AND venue='curve' AND ts<=? GROUP BY token", chunk + [clock]):
+            net_quote[r[0]] = float(r[1] or 0)
+        for r in q(f"SELECT token, ts, side, CAST(token_amount AS REAL), CAST(quote_amount AS REAL), quote_token, wallet FROM trades WHERE token IN ({ph}) AND ts>? AND ts<=? AND CAST(quote_amount AS REAL)>0 AND CAST(token_amount AS REAL)>0 ORDER BY ts", chunk + [clock - 3600, clock]):
+            hour_trades[r[0]].append(r[1:])
     out = []
     for tok, d in per.items():
         inflow10 = len(d["w10"])
-        if len(d["wall"]) < min_wallets:
-            continue
         prev_rate = len(d["wprev"]) / max(1.0, (t10 - lo) / 600)  # wallets per 10 min before
         accel = inflow10 / prev_rate if prev_rate > 0 else (float(inflow10) if inflow10 else 0.0)
         breadth = len(d["src10"])
         qs = [scores[w] for w in d["w10"] if w in scores]
         quality = (sum(qs) / len(qs)) if qs else None
-        la = pons.launch_of(store, tok)
-        first_seen = pons.first_seen_block(store, tok)
+        la = launches.get(tok)
         age_s = None
         if la and la.get("ts"):
             age_s = clock - la["ts"]
-        elif first_seen:
-            bt = store.db.execute("SELECT ts FROM trades WHERE token=? ORDER BY block LIMIT 1", (tok,)).fetchone()
-            age_s = (clock - bt[0]) if bt and bt[0] else None
-        prog = pons.curve_progress(store, tok, clock)
+        elif first_ts.get(tok):
+            age_s = clock - first_ts[tok]
+        thr = float(la["threshold"]) if la and la.get("threshold") else None
+        graduated = tok in grads
+        prog = {"progress": (min(1.0, net_quote.get(tok, 0.0) / thr) if thr and thr > 0 else None) if not graduated else 1.0, "graduated": graduated, "graduation": grads.get(tok), "stage": "graduated" if graduated else ("curve" if net_quote.get(tok) is not None else "unknown")}
         st = prog["stage"]
         mentions = (ctx.get("mentions") or {}).get(tok)
         m1h = mentions.get("mentions_1h") if mentions else None
@@ -149,7 +211,7 @@ def radar(
             "mentions_24h": mentions.get("mentions_24h") if mentions else None,
             **sc,
         }
-        cs = curve_stats(store, tok, clock, qdec)
+        cs = stats_from_rows(hour_trades.get(tok, []), clock, qdec)
         row["price_quote"] = cs["price_quote"]
         row["quote_symbol"] = qsym.get(cs["quote"] or "", None)
         row["chg_5m"] = cs["chg_5m"]
@@ -162,29 +224,36 @@ def radar(
         hd = (ctx.get("holders") or {}).get(tok)
         if hd and "holders" in hd:
             row["holders"] = {k: hd.get(k) for k in ("holders", "top10_share", "dev_share", "dev_sold_share", "launch_block_buyers", "as_of_block")}
-        # filters
-        if age_max_s is not None and (age_s is None or age_s > age_max_s):
-            continue
-        if stage and st != stage:
-            continue
-        if quality_min is not None and (quality is None or quality < quality_min):
-            continue
-        if mentions_max is not None and m1h is not None and m1h > mentions_max:
-            continue
-        if progress_min is not None and (prog["progress"] is None or prog["progress"] < progress_min):
-            continue
         out.append(row)
-    key = {
-        "score": lambda r: -r["score"],
-        "inflow": lambda r: -r["inflow_10m"],
-        "accel": lambda r: -r["accel"],
-        "quality": lambda r: -(r["quality"] or 0),
-        "progress": lambda r: -(r["progress"] or 0),
-        "age": lambda r: (r["age_s"] if r["age_s"] is not None else 10**9),
-        "mentions": lambda r: (r["mentions_1h"] if r["mentions_1h"] is not None else 10**9),
-    }.get(sort, lambda r: -r["score"])
-    out.sort(key=key)
-    return {"clock": clock, "window_s": window_s, "span_s": span_s, "rows": out[:limit], "total": len(out), "presets": PRESETS, "bots_excluded": len(bots), "wallet_scores_known": len(scores), "computed_at": time.time()}
+    return out
+
+
+def stats_from_rows(rows: list[tuple], as_of_ts: int, quote_decimals: dict[str, int]) -> dict[str, Any]:
+    """Same numbers as context.market.curve_stats, computed from rows preloaded for many coins at once."""
+    if not rows:
+        return {"price_quote": None, "quote": None, "chg_5m": None, "chg_1h": None, "vol_1h_quote": 0.0, "trades_1h": 0, "buyers_1h": 0}
+    qt = rows[-1][4]
+    dec = quote_decimals.get(qt or "", 18)
+    scale = 10 ** (18 - dec)
+
+    def med(rs):
+        ps = sorted((r[3] / r[2]) * scale for r in rs)
+        return ps[len(ps) // 2] if ps else None
+
+    last = med(rows[-5:])
+    win5 = [r for r in rows if r[0] >= as_of_ts - 300]
+    p5 = med(win5[:5]) if win5 else None
+    p60 = med(rows[:5])
+    buyers = {r[5] for r in rows if r[1] == "buy"}
+    return {
+        "price_quote": last,
+        "quote": qt,
+        "chg_5m": ((last / p5 - 1) * 100) if p5 and last else None,
+        "chg_1h": ((last / p60 - 1) * 100) if p60 and last else None,
+        "vol_1h_quote": sum(r[3] for r in rows) / (10**dec),
+        "trades_1h": len(rows),
+        "buyers_1h": len(buyers),
+    }
 
 
 def coin(store: Store, token: str, window_s: int, clock: int, span_s: int, rpc=None, context: dict[str, Any] | None = None, live: bool = False) -> dict[str, Any]:

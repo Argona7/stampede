@@ -14,6 +14,7 @@ from ..env import ROOT, db_path
 from ..rotation import parse_window
 from ..store import Store
 import json
+import threading
 
 from ..context.holders import holders as fetch_holders
 from ..context.market import GeckoTerminal, budget
@@ -128,6 +129,25 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
     worker.start()
     state["worker"] = worker
 
+    radar_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+    radar_lock = threading.Lock()
+
+    def radar_rows_cached(s: Store, w: int, clock: int, sp: int, exclude_bots: bool, ttl: float = 4.0) -> list[dict[str, Any]]:
+        """One expensive computation per (clock, window, span) at a time; others reuse it for a few seconds."""
+        key = f"{w}:{clock}:{sp}:{int(exclude_bots)}"
+        hit = radar_cache.get(key)
+        if hit and time.time() - hit[0] < ttl:
+            return hit[1]
+        with radar_lock:
+            hit = radar_cache.get(key)
+            if hit and time.time() - hit[0] < ttl:
+                return hit[1]
+            rows = radar_mod.rows_with_context(s, w, clock, sp, exclude_bots, mode == "live")
+            if len(radar_cache) > 32:
+                radar_cache.clear()
+            radar_cache[key] = (time.time(), rows)
+            return rows
+
     @app.get("/api/radar")
     def get_radar(
         window: str | None = None,
@@ -156,11 +176,8 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
                 for k, v in radar_mod.PRESETS[preset].items():
                     if k != "label":
                         params[k] = v
-            # first pass without context to learn the candidates, then attach cached context and filter
-            base = radar_mod.radar(s, w, clock, sp, limit=max(limit, 60), **{k: v for k, v in params.items() if k not in ("mentions_max",)})
-            toks = [r["address"] for r in base["rows"]]
-            ctx = {"mentions": load_context(s, "mentions", toks), "market": load_context(s, "market", toks) if mode == "live" else {}, "holders": load_context(s, "holders", toks)}
-            out = radar_mod.radar(s, w, clock, sp, limit=limit, context=ctx, **params)
+            rows = radar_rows_cached(s, w, clock, sp, bool(params["exclude_bots"]))
+            out = radar_mod.radar(s, w, clock, sp, limit=limit, rows=rows, **params)
             out["session"] = st
             out["context"] = {"policy": context_policy, "enabled": worker.status.get("context_enabled"), "x_enabled": bool(_env("TWITTERAPI_KEY")), "last_cycle": worker.status.get("last_cycle"), "budget": budget(s)}
             out["preset"] = preset
