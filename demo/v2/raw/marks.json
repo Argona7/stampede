@@ -1,10 +1,10 @@
 {
- "recorded_at_utc": "2026-09-10T21:00:27.459Z",
+ "recorded_at_utc": "2026-09-11T09:33:48.333Z",
  "base": "http://127.0.0.1:8791",
- "session_id": "S-a0cfdf",
- "replay_speed": 10,
+ "session_id": "S-bbb72a",
+ "replay_speed": 20,
  "replay_clock_start_ts": 1789061067,
- "replay_clock_end_ts": 1789061202,
+ "replay_clock_end_ts": 1789061336,
  "dpr": 1,
  "edge": {
   "from": "0x6c36aa7f9128d67cc0e114a59841d572849c1a01",
@@ -19,63 +19,69 @@
  },
  "marks": [
   {
+   "name": "boot",
+   "note": "page opens: the visible history streams through the tape while the network builds up in time order",
+   "offset_s": 0,
+   "clock_ts": null
+  },
+  {
    "name": "overview",
-   "note": "presentation layout, whole network from the 3/4 angle",
-   "offset_s": 3.3,
+   "note": "presentation layout, whole network from the 3/4 angle, tape idle",
+   "offset_s": 4.7,
    "clock_ts": null
   },
   {
    "name": "play",
-   "note": "replay running at 10x; new sequences pulse along their edges",
-   "offset_s": 3.3,
+   "note": "replay running at 20x; new sequences pulse along their edges",
+   "offset_s": 4.7,
    "clock_ts": null
   },
   {
    "name": "pulses",
    "note": "first pulses visible",
-   "offset_s": 4.5,
+   "offset_s": 5.5,
    "clock_ts": null
   },
   {
    "name": "select",
    "note": "edge selected: 0x6c36aa7f9128d67cc0e114a59841d572849c1a01 -> 0x4ad59292fe286460f5e533dfabe4a868e1e87b08 (54 wallets at selection time)",
-   "offset_s": 8,
+   "offset_s": 9.1,
    "clock_ts": null
   },
   {
    "name": "follow",
    "note": "camera at A, travelling along the route to B",
-   "offset_s": 8.9,
+   "offset_s": 10,
    "clock_ts": null
   },
   {
    "name": "evidence",
    "note": "camera settled: A · SOLD, B · BOUGHT, wallet count caption",
-   "offset_s": 11.4,
+   "offset_s": 12.6,
    "clock_ts": null
   },
   {
    "name": "rows",
    "note": "evidence rows: wallet, sold/bought, exact UTC block time, tx links",
-   "offset_s": 14.9,
+   "offset_s": 16.2,
    "clock_ts": null
   },
   {
    "name": "pause",
    "note": "replay paused from the shared session; clock frozen on both surfaces",
-   "offset_s": 16.8,
+   "offset_s": 18.2,
    "clock_ts": null
   },
   {
    "name": "back",
    "note": "Esc: back to the overview",
-   "offset_s": 17.4,
+   "offset_s": 18.8,
    "clock_ts": null
   },
   {
    "name": "end",
    "note": "",
-   "offset_s": 19,
+   "offset_s": 20.4,
    "clock_ts": null
   }
  ],

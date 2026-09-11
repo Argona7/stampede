@@ -338,6 +338,8 @@ class StampedeTUI(App):
                 self._add_row(table, e)
         del self._stream_queue[:n]
         self._stream_done += n
+        if table.row_count:
+            self.query_one("#empty", Static).set_class(False, "visible")
         if self.follow and table.row_count:
             table.move_cursor(row=table.row_count - 1, scroll=True)
         self.render_feedhead()
@@ -510,7 +512,7 @@ class StampedeTUI(App):
                 delta = e["wallets_main"] - self.hot_prev.get(key, e["wallets_main"])
                 dtxt = f"+{delta}" if delta > 0 else ("" if delta == 0 else str(delta))
                 t.append(f"\n{e['wallets_main']:>4} ", style=f"bold {TEXT}")
-                t.append(f"{a[:12]:<12} → {b[:12]:<12}", style=TEXT)
+                t.append(f"{a[:16]:<16} → {b[:16]:<16}", style=TEXT)
                 t.append(f"  {e['sequences']} seq", style=SECONDARY)
                 if dtxt:
                     t.append(f"  {dtxt} since last refresh", style=PRIMARY if delta > 0 else SECONDARY)

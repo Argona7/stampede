@@ -1,5 +1,5 @@
-session S-a0cfdf, replay 10x, clock start 17:24:27 UTC
-seg-tui.mp4: frames tui-01..tui-08 (Textual renders, 0.5 s each) = 4.0 s
-seg-web.mp4: web-walkthrough.webm from 1.2s for 17.8s, transition caption for 3 s
-cut-5s-pair-count-evidence.mp4: web-walkthrough.webm from 7.6s for 5.0 s (select at 8s, evidence settled at 11.4s)
+session S-bbb72a, replay 20x, clock start 17:24:27 UTC
+seg-tui.mp4: 20 Textual renders at 0.2 s each = 4.0 s
+seg-web.mp4: web-walkthrough.webm from 0.2s for 20.2s, transition caption for 3 s
+cut-5s-pair-count-evidence.mp4: web-walkthrough.webm from 8.7s for 5.0 s (select at 9.1s, evidence settled at 12.6s)
 edge in the cut: 0x6c36aa7f9128d67cc0e114a59841d572849c1a01 -> 0x4ad59292fe286460f5e533dfabe4a868e1e87b08, 54 distinct wallets at selection time

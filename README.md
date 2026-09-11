@@ -55,7 +55,7 @@ chain head (measured head lag 2–5 s) and shows a provider error instead of a f
 
 Terminal keys: `↑/↓` select, `Enter` open pair, `Esc` back, `/` filter, `End` follow tail, `space`
 play/pause, `←/→` seek 60 s, `[ ]` speed, `q` quit. Web keys: click a line or a coin, `E` evidence rows,
-`Esc` overview, `P` presentation/explore, `space` play/pause.
+`Esc` overview, `P` presentation/explore, `T` tape, `space` play/pause.
 
 API: `/api/status` (scopes: fixed sample vs whole store), `/api/session` (shared clock), `/api/events`
 (observed sequences with stable ids and a cursor; `history` after a seek, `new` afterwards),

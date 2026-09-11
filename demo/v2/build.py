@@ -46,8 +46,21 @@ start_ts = marks["replay_clock_start_ts"]
 speed = marks["replay_speed"]
 edge = marks["edge"]
 
-# 1) TUI segment: frames at 5 fps (0.2 s each), scaled to 1440 wide and padded to 900
-frames = sorted(TUI.glob("tui-*.png"))
+# 1) TUI segment: frames at 5 fps (0.2 s each), scaled to 1440 wide and padded to 900.
+# Start at the first frame where the history stream is visible (the connecting state before it is dead time).
+import html
+import re
+
+def has_stream(png: Path) -> bool:
+    svg = png.with_suffix(".svg")
+    if not svg.exists():
+        return True
+    txt = re.sub(r"<[^>]+>", "", svg.read_text())
+    return "STREAMING" in html.unescape(txt)
+
+all_frames = sorted(TUI.glob("tui-*.png"))
+first = next((i for i, f in enumerate(all_frames) if has_stream(f)), 0)
+frames = all_frames[first : first + 20] if len(all_frames) - first >= 20 else all_frames[-20:]
 FRAME_S = 0.2
 lst = OUT / "tui-frames.txt"
 lst.write_text("".join(f"file '{f}'\nduration {FRAME_S}\n" for f in frames) + f"file '{frames[-1]}'\n")

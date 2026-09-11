@@ -12,8 +12,14 @@
 | Палитра | Чёрный/красный/нейтральный текст в TUI и web; кислотные цвета не перенесены; ошибка отличается от события | Выполнено | Токены `#050505/#0D0A0A/#351419/#FF3344/#260D12/#F2F2F2/#A3A3A3/#747474` в `web/src/styles.css` и `stampede/tui/app.py`; grep по lime/cyan/magenta/orange/зелёному пуст; ошибка — инверсия (красный фон, чёрный текст, `!`), события — красный маркер/линия на чёрном |
 | Читаемость | На кадре 720×450 читаются имя, A→B, число, REPLAY/LIVE | Выполнено, проверено глазами | `demo/shots/16-web-v2-evidence-720x450.png`, `demo/v2/out/frame-web-evidence-720x450.png` |
 | Ошибки | Provider/network error не заменяется mock; stale/unknown не зелёный; нет 1970 | Выполнено | `demo/v2/errors/*` (web и TUI с неверным ключом: инверсный блок, `LAST BLOCK ? UTC`, пустая лента); `tests/test_contract.py::test_interp_never_invents_1970`; `stampede repair-ts` исправил 1 819 строк с ts=0, `store.unknown_time_trades=0`; `connection: stale` при возрасте >60 с; live не рисует старую выборку до первого live-блока |
-| Регрессия | 26 старых тестов зелёные; добавлены тесты контракта/часов/TUI/web; build и lint проходят | Выполнено | `pytest -q`: 41 passed (26 старых + 7 контракт + 7 TUI + 1 shared session); `npx playwright test`: 6 passed; `npm run build` и `npm run lint` без ошибок (одно предупреждение в скрипте записи) |
+| Регрессия | 26 старых тестов зелёные; добавлены тесты контракта/часов/TUI/web; build и lint проходят | Выполнено | `pytest -q`: 42 passed (26 старых + 8 контракт + 7 TUI + 1 shared session); `npx playwright test`: 6 passed; `npm run build` и `npm run lint` без ошибок |
 | Воспроизводимость | Свежая установка по README, сохранённые команды, повтор записи | См. `docs/RELEASE-CHECKLIST.md` | Команды записи в `docs/DEMO-V2.md`; `demo/v2/build.py` собирает mp4 из сырых записей; `SHA256SUMS.txt` |
+
+## Проверка пользы на живой сети (2026-09-11)
+
+`python scripts/bg.py serve-live -- .venv/bin/python -m stampede serve --mode live --port 8793`, через ~4 мин: блок 60 152 073, лаг 2.7 с, 66 тиков, 207 direct/clean последовательностей за последние 30 минут реального времени. `scripts/verify_live_sequences.py --n 6`: 6/6 новейших последовательностей подтверждены независимо через raw RPC (обе транзакции существуют, кошелёк реально отправил проданный токен и получил купленный по Transfer-логам, sell-блок раньше buy-блока, время заголовков совпадает с записанным). Вывод: `demo/v3/live/verify.json`, кадры TUI на live: `demo/v3/live/tui-live-*.png`. Топ ротаций на тот момент: `BEARLY·daed → SQUIDMIND·1c82` 6 кошельков, `AAPL·d4ec → FIRST·1d80` 5.
+
+Найдено и исправлено по ходу: 502 тикера в базе принадлежат нескольким монетам (RBNHD ×28, MARIO ×13) — строки вида `MONARCH → MONARCH` были двумя разными монетами. Теперь такие тикеры получают суффикс адреса (`MARIO·43cb`) во всех выдачах API, TUI и web (тест `test_duplicate_tickers_are_disambiguated_by_address`).
 
 ## Что измерено по кадрам
 

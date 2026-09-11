@@ -41,7 +41,8 @@ async def main() -> int:
     n = 0
     async with app.run_test(size=(w, h)) as pilot:
         await asyncio.sleep(a.wait)
-        await pilot.pause()
+        if not a.frames:
+            await pilot.pause()
         app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
         n += 1
         for k in [k.strip() for k in a.keys.split(",") if k.strip()]:
@@ -55,8 +56,8 @@ async def main() -> int:
             app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
             n += 1
         for _ in range(a.frames):
+            # timed frames: no pilot.pause() here, it would wait for an idle app and hide the streaming phase
             await asyncio.sleep(a.every)
-            await pilot.pause()
             app.save_screenshot(f"{a.prefix}-{n:02d}.svg", path=str(out))
             n += 1
     print(f"wrote {n} frames to {out}")
