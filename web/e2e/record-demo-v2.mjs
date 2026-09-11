@@ -16,7 +16,7 @@ const OUT = path.resolve(process.env.OUT ?? '../demo/v2/raw')
 const DPR = Number(process.env.DPR ?? 1)
 const PERF = process.env.PERF === '1'
 const LEAD_S = Number(process.env.LEAD_S ?? 330)
-const SPEED = Number(process.env.SPEED ?? 10)
+const SPEED = Number(process.env.SPEED ?? 20)
 
 fs.mkdirSync(OUT, { recursive: true })
 const post = (b) => fetch(`${BASE}/api/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.json())
@@ -42,9 +42,12 @@ const mark = (name, note = '') => marks.push({ name, note, offset_s: Math.round(
 const shot = (name) => page.screenshot({ path: path.join(OUT, `${name}.png`) })
 
 await page.goto(`${BASE}/?layout=presentation${PERF ? '&perf=1' : ''}`)
+mark('boot', 'page opens: the visible history streams through the tape while the network builds up in time order')
 await page.waitForFunction(() => window.__stampede_state && (window.__stampede_state().edges ?? 0) > 0)
-await page.waitForTimeout(2600) // overview flight settles
-mark('overview', 'presentation layout, whole network from the 3/4 angle')
+await page.waitForTimeout(1300)
+await shot('web-boot')
+await page.waitForTimeout(2400) // build-up and dolly-in settle
+mark('overview', 'presentation layout, whole network from the 3/4 angle, tape idle')
 await shot('web-overview')
 
 await post({ action: 'play' })

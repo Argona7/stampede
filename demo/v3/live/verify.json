@@ -1,0 +1,165 @@
+{
+ "checked_at_utc": "2026-09-11T09:30:27.433475+00:00",
+ "live": {
+  "running": true,
+  "paused": false,
+  "ticks": 66,
+  "last_error": null,
+  "head_block": 60152096,
+  "head_lag_s": 2.7,
+  "last_block": 60152073,
+  "last_ts": 1789119017,
+  "tick_ms": 1792,
+  "new_trades_total": 4589,
+  "new_sequences_total": 662,
+  "start_block": 60150077,
+  "start_ts": 1789118815,
+  "gaps": [
+   [
+    59633451,
+    60150076,
+    "not indexed: the live tail was stopped for too long to catch up"
+   ]
+  ]
+ },
+ "session": {
+  "id": "S-d7c54d",
+  "rev": 0,
+  "mode": "live",
+  "label": "LIVE",
+  "clock_ts": 1789119017,
+  "playing": false,
+  "speed": 10.0,
+  "span_s": 1800,
+  "window_s": 1800,
+  "from_ts": 1789057797,
+  "to_ts": 1789061397,
+  "at_end": null,
+  "server_time": 1789119020,
+  "controls": false,
+  "live_paused": false
+ },
+ "in_range": 207,
+ "results": [
+  {
+   "wallet": "0x966f164b735505ee849e80e7c305463c0afa6764",
+   "pair": "HEFT -> LIQ\u00b77a80",
+   "grade": "clean",
+   "sell_tx": "0x9d896aa721daf648fdb7d9ef9f8363288d9e49e5a89909c0aa5f0c23c585890f",
+   "buy_tx": "0x53d72a3ee31d8be37427852ed83e358b64600caa82e4126fe30adf123ca1aa07",
+   "sell_block": 60151873,
+   "buy_block": 60152034,
+   "sell_block_time": "09:29:57",
+   "buy_block_time": "09:30:13",
+   "recorded_buy_time": "09:30:13",
+   "tx_from_is_wallet": {
+    "sell": true,
+    "buy": true
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  },
+  {
+   "wallet": "0x708660215a8da5543e7ef2bb151cabfeb9ee2de7",
+   "pair": "GMC -> BEARLY\u00b7daed",
+   "grade": "clean",
+   "sell_tx": "0x691ce86294cfc09b2c0f4148a88714dc52aa3de10786f47f11bb52439d7ae041",
+   "buy_tx": "0x6fa43e940f1664564acf652d962d156b89164cf76ccfbe6ea38569db6e24f14d",
+   "sell_block": 60151899,
+   "buy_block": 60152037,
+   "sell_block_time": "09:29:59",
+   "buy_block_time": "09:30:13",
+   "recorded_buy_time": "09:30:13 (interpolated)",
+   "tx_from_is_wallet": {
+    "sell": true,
+    "buy": true
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  },
+  {
+   "wallet": "0x35efec16219a908dca579a9d9b3438b347266aac",
+   "pair": "EMILE -> LIQ\u00b77a80",
+   "grade": "clean",
+   "sell_tx": "0x3490ac176dde2ca7c560f2f8833c58b4e7c2df567db37bf8bb9ece5c389d3897",
+   "buy_tx": "0x8eeb384c5c5629b2b5350115f4a91ec5b30e27cbb5a55ee6386eba6f4bf8a94d",
+   "sell_block": 60150766,
+   "buy_block": 60152040,
+   "sell_block_time": "09:28:04",
+   "buy_block_time": "09:30:14",
+   "recorded_buy_time": "09:30:14",
+   "tx_from_is_wallet": {
+    "sell": false,
+    "buy": false
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  },
+  {
+   "wallet": "0xe48ef0373baa011d249ec81d0437b0d6895c8e3e",
+   "pair": "PEG\u00b785c8 -> TADPOLEBRAIN",
+   "grade": "clean",
+   "sell_tx": "0x74ce3401ac6f992d64649b9e4c4a9f587d4fdc3c023ba8ad488f8f3dd3173e8d",
+   "buy_tx": "0x2710729f4c14ad8b5b9b2318f6f348fdfea1e345e288e9ce9a8cbdf11ae995b5",
+   "sell_block": 60151920,
+   "buy_block": 60152052,
+   "sell_block_time": "09:30:02",
+   "buy_block_time": "09:30:15",
+   "recorded_buy_time": "09:30:15 (interpolated)",
+   "tx_from_is_wallet": {
+    "sell": false,
+    "buy": false
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  },
+  {
+   "wallet": "0x7bb584f637cf7ca106b8adc520bf75d70b158b0a",
+   "pair": "LIQ\u00b77a80 -> TADPOLEBRAIN",
+   "grade": "clean",
+   "sell_tx": "0x3b249a76f7d6e4bdc2c7fe6e1b6bcd1e9b4e2fa45f4b174cd2d31a0a16271110",
+   "buy_tx": "0xeffdf46ea519ee0d1a69626d52b6e701c89c2c89b26d747b72c40b6891eb3b7d",
+   "sell_block": 60151797,
+   "buy_block": 60152053,
+   "sell_block_time": "09:29:49",
+   "buy_block_time": "09:30:15",
+   "recorded_buy_time": "09:30:15 (interpolated)",
+   "tx_from_is_wallet": {
+    "sell": true,
+    "buy": true
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  },
+  {
+   "wallet": "0xd8b249ecf00a160ad25a165c135cf8a26378ed5d",
+   "pair": "ZEAL -> jar",
+   "grade": "clean",
+   "sell_tx": "0xf1b8de5f762ac17cf588996adef17b167bb55ef87565953a6393ce767b661cb1",
+   "buy_tx": "0x86d7c15dd170703466b3ae591c2da9fe02f4b8dd028b3fa0953db5d1126c5c82",
+   "sell_block": 60150273,
+   "buy_block": 60152068,
+   "sell_block_time": "09:27:14",
+   "buy_block_time": "09:30:17",
+   "recorded_buy_time": "09:30:17 (interpolated)",
+   "tx_from_is_wallet": {
+    "sell": true,
+    "buy": true
+   },
+   "wallet_sent_sold_token": true,
+   "wallet_received_bought_token": true,
+   "sell_before_buy": true,
+   "verified": true
+  }
+ ]
+}

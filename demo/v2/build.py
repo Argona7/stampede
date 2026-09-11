@@ -46,15 +46,16 @@ start_ts = marks["replay_clock_start_ts"]
 speed = marks["replay_speed"]
 edge = marks["edge"]
 
-# 1) TUI segment: 8 frames x 0.5 s = 4 s, scaled to 1440 wide and padded to 900
-frames = sorted(TUI.glob("tui-*.png"))[1:9]
+# 1) TUI segment: frames at 5 fps (0.2 s each), scaled to 1440 wide and padded to 900
+frames = sorted(TUI.glob("tui-*.png"))
+FRAME_S = 0.2
 lst = OUT / "tui-frames.txt"
-lst.write_text("".join(f"file '{f}'\nduration 0.5\n" for f in frames) + f"file '{frames[-1]}'\n")
-caption(OUT / "cap-tui.png", f"TERMINAL  ·  stampede terminal  ·  REPLAY {speed}×  ·  session {sid}  ·  replay clock from {utc(start_ts)} UTC", "Rows arrive as the shared clock reaches their buy transactions. Red mark = received since the previous poll. Caption added in post.")
+lst.write_text("".join(f"file '{f}'\nduration {FRAME_S}\n" for f in frames) + f"file '{frames[-1]}'\n")
+caption(OUT / "cap-tui.png", f"TERMINAL  ·  stampede terminal  ·  REPLAY {speed}×  ·  session {sid}  ·  replay clock from {utc(start_ts)} UTC", "The visible history streams into the feed on start, then rows arrive as the shared clock reaches their buy transactions. Caption added in post.")
 run(f"ffmpeg -v error -y -f concat -safe 0 -i '{lst}' -i '{OUT}/cap-tui.png' -filter_complex \"[0:v]scale=1440:-2,pad=1440:900:0:0:color=0x050505,format=yuv420p[v];[v][1:v]overlay=0:main_h-overlay_h\" -r 30 -c:v libx264 -crf 18 -pix_fmt yuv420p '{OUT}/seg-tui.mp4'")
 
-# 2) Web segment: from after page load to the end; first 3 s carry the transition caption
-web_in = 1.2
+# 2) Web segment: from the page open (boot: tape + build-up) to the end; first 3 s carry the transition caption
+web_in = 0.2
 web_dur = m["end"] - web_in
 caption(OUT / "cap-web.png", f"WEB SCENE  ·  same replay session {sid}  ·  clock reset to {utc(start_ts)} UTC and played again at {speed}×", "Recorded separately from the terminal clip; the cut between them is an edit, not a live continuation. Caption added in post.")
 run(
@@ -76,7 +77,7 @@ run(f"ffmpeg -v error -y -i '{OUT}/frame-web-evidence.png' -vf scale=720:450 '{O
 run(f"cd '{HERE}' && shasum -a 256 raw/web-walkthrough.webm tui/tui-0*.png out/*.mp4 > out/SHA256SUMS.txt")
 (OUT / "cuts.txt").write_text(
     f"session {sid}, replay {speed}x, clock start {utc(start_ts)} UTC\n"
-    f"seg-tui.mp4: frames tui-01..tui-08 (Textual renders, 0.5 s each) = 4.0 s\n"
+    f"seg-tui.mp4: {len(frames)} Textual renders at {FRAME_S} s each = {len(frames) * FRAME_S:.1f} s\n"
     f"seg-web.mp4: web-walkthrough.webm from {web_in}s for {web_dur:.1f}s, transition caption for 3 s\n"
     f"cut-5s-pair-count-evidence.mp4: web-walkthrough.webm from {cut_from:.1f}s for 5.0 s (select at {m['select']}s, evidence settled at {m['evidence']}s)\n"
     f"edge in the cut: {edge['from']} -> {edge['to']}, {edge['wallets_main']} distinct wallets at selection time\n"

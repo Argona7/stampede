@@ -42,7 +42,12 @@ interface Props {
   focusNonce: number
   labelBudget: number // max labelled nodes in overview
   panelOpen?: boolean // evidence panel covers the right side: keep the pair in the left 55%
+  revealAt?: number | null // performance.now() of the last history (re)load: the graph builds up in time order
+  revealRange?: { from: number; to: number } | null
+  hudRight?: number // px of HUD (tape) covering the right edge: the overview is framed into the remaining width
 }
+
+export const REVEAL_MS = 2600
 
 const BG = 0x050505
 const RED = new THREE.Color('#FF3344')
@@ -107,6 +112,9 @@ export default function Scene3D(p: Props) {
     labelEls: Map<string, HTMLDivElement>
     hover: Selection
     drawnEdges: number
+    reveal: { buckets: { geo: THREE.BufferGeometry | LineSegmentsGeometry; instanced: boolean; edgeTs: number[]; segs: number }[]; nodeTs: number[] } | null
+    revealedNodes: number
+    nodeRank: Map<string, number>
   } | null>(null)
   const propsRef = useRef(p)
   propsRef.current = p
@@ -115,6 +123,7 @@ export default function Scene3D(p: Props) {
   const framedRadius = useRef(1)
   const userMoved = useRef(false)
   const lastPanelRef = useRef(false)
+  const lastRevealRef = useRef<number | null>(null)
 
   // ---- init ----
   useEffect(() => {
@@ -179,6 +188,9 @@ export default function Scene3D(p: Props) {
       labelEls: new Map(),
       hover: null,
       drawnEdges: 0,
+      reveal: null,
+      revealedNodes: Infinity,
+      nodeRank: new Map(),
     }
     const ro = new ResizeObserver(() => {
       const r = wrap.getBoundingClientRect()
@@ -256,6 +268,38 @@ export default function Scene3D(p: Props) {
           if (s.frameTimes.length > 180) s.frameTimes.shift()
         }
       }
+      // build-up: edges and coins appear in the order their first sequence was observed
+      const ra = propsRef.current.revealAt
+      const rr = propsRef.current.revealRange
+      if (s.reveal && ra && rr && now - ra < REVEAL_MS) {
+        const t = ease(Math.min(1, (now - ra) / REVEAL_MS))
+        const thr = rr.from + t * (rr.to - rr.from)
+        const upper = (arr: number[]) => {
+          let lo = 0
+          let hi = arr.length
+          while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            if (arr[mid] <= thr) lo = mid + 1
+            else hi = mid
+          }
+          return lo
+        }
+        for (const b of s.reveal.buckets) {
+          const n = upper(b.edgeTs) * b.segs
+          if (b.instanced) (b.geo as LineSegmentsGeometry).instanceCount = n
+          else b.geo.setDrawRange(0, n * 2)
+        }
+        s.revealedNodes = upper(s.reveal.nodeTs)
+        if (s.nodeMesh) s.nodeMesh.count = Math.max(0, s.revealedNodes)
+        animating = true
+      } else if (s.reveal && s.revealedNodes !== Infinity) {
+        for (const b of s.reveal.buckets) {
+          if (b.instanced) (b.geo as LineSegmentsGeometry).instanceCount = b.edgeTs.length * b.segs
+          else b.geo.setDrawRange(0, Infinity)
+        }
+        s.revealedNodes = Infinity
+        if (s.nodeMesh) s.nodeMesh.count = s.reveal.nodeTs.length
+      }
       s.lastFrame = now
       s.frames++
       s.renderer.render(s.scene, s.camera)
@@ -307,6 +351,11 @@ export default function Scene3D(p: Props) {
       for (const [id, kind] of want) {
         const n = s.layout?.nodes.get(id)
         if (!n) continue
+        if ((s.nodeRank.get(id) ?? 0) >= s.revealedNodes) {
+          s.labelEls.get(id)?.remove()
+          s.labelEls.delete(id)
+          continue
+        }
         let el = s.labelEls.get(id)
         if (!el) {
           el = document.createElement('div')
@@ -412,7 +461,16 @@ export default function Scene3D(p: Props) {
       s.scene.remove(s.nodeMesh)
       s.nodeMesh.geometry.dispose()
     }
-    const arr = [...layout.nodes.values()]
+    const firstTs = new Map<string, number>()
+    for (const e of p.edges) firstTs.set(`${e.from}->${e.to}`, e.first_ts ?? 0)
+    const nodeFirst = new Map<string, number>()
+    for (const e of p.edges) {
+      const t = e.first_ts ?? 0
+      nodeFirst.set(e.from, Math.min(nodeFirst.get(e.from) ?? Infinity, t))
+      nodeFirst.set(e.to, Math.min(nodeFirst.get(e.to) ?? Infinity, t))
+    }
+    const arr = [...layout.nodes.values()].sort((a, b) => (nodeFirst.get(a.id) ?? 0) - (nodeFirst.get(b.id) ?? 0))
+    s.nodeRank = new Map(arr.map((n, i) => [n.id, i]))
     const geo = new THREE.SphereGeometry(1, 14, 10)
     const mat = new THREE.MeshLambertMaterial({ color: 0xffffff })
     const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, arr.length))
@@ -444,14 +502,16 @@ export default function Scene3D(p: Props) {
     s.lineMaterials = []
     s.edgePoints.clear()
     const r = s.renderer.domElement.getBoundingClientRect()
-    const links = layout.links.filter((l) => l.main > 0 || (p.showAmbiguous && l.amb > 0))
-    const sorted = [...links].sort((a, b) => b.main - a.main)
-    const thickSet = new Set(sorted.slice(0, 24).map((l) => l.key))
+    // edges sorted by first observation so a (re)load can build the picture up chronologically
+    const links = layout.links.filter((l) => l.main > 0 || (p.showAmbiguous && l.amb > 0)).sort((a, b) => (firstTs.get(a.key) ?? 0) - (firstTs.get(b.key) ?? 0))
+    const byWeight = [...links].sort((a, b) => b.main - a.main)
+    const thickSet = new Set(byWeight.slice(0, 24).map((l) => l.key))
     const thin: number[] = []
     const thinCol: number[] = []
     const mid: number[] = []
     const thick: number[] = []
     const amb: number[] = []
+    const tsOf = { thin: [] as number[], mid: [] as number[], thick: [] as number[], amb: [] as number[] }
     const pushSeg = (arr: number[], pts: THREE.Vector3[]) => {
       for (let i = 0; i < pts.length - 1; i++) arr.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z)
     }
@@ -460,19 +520,29 @@ export default function Scene3D(p: Props) {
       const b = layout.nodes.get(l.to)!
       const pts = curvePoints(a, b)
       s.edgePoints.set(l.key, pts)
-      if (l.main === 0) pushSeg(amb, pts)
-      else if (thickSet.has(l.key) && l.main >= 3) pushSeg(thick, pts)
-      else if (l.main >= 3) pushSeg(mid, pts)
-      else {
+      const t = firstTs.get(l.key) ?? 0
+      if (l.main === 0) {
+        pushSeg(amb, pts)
+        tsOf.amb.push(t)
+      } else if (thickSet.has(l.key) && l.main >= 3) {
+        pushSeg(thick, pts)
+        tsOf.thick.push(t)
+      } else if (l.main >= 3) {
+        pushSeg(mid, pts)
+        tsOf.mid.push(t)
+      } else {
         pushSeg(thin, pts)
+        tsOf.thin.push(t)
         for (let i = 0; i < (pts.length - 1) * 2; i++) thinCol.push(EDGE_THIN.r, EDGE_THIN.g, EDGE_THIN.b)
       }
     }
+    const buckets: NonNullable<typeof s.reveal>['buckets'] = []
     if (thin.length) {
       const g = new THREE.BufferGeometry()
       g.setAttribute('position', new THREE.Float32BufferAttribute(thin, 3))
       g.setAttribute('color', new THREE.Float32BufferAttribute(thinCol, 3))
       s.lineGroup.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9 })))
+      buckets.push({ geo: g, instanced: false, edgeTs: tsOf.thin, segs: CURVE_SEGMENTS })
     }
     if (amb.length) {
       const g = new THREE.BufferGeometry()
@@ -481,8 +551,9 @@ export default function Scene3D(p: Props) {
       const ls = new THREE.LineSegments(g, dm)
       ls.computeLineDistances()
       s.lineGroup.add(ls)
+      buckets.push({ geo: g, instanced: false, edgeTs: tsOf.amb, segs: CURVE_SEGMENTS })
     }
-    const fat = (segs: number[], width: number, color: THREE.Color) => {
+    const fat = (segs: number[], width: number, color: THREE.Color, ts: number[]) => {
       if (!segs.length) return
       const g = new LineSegmentsGeometry()
       g.setPositions(segs)
@@ -490,9 +561,12 @@ export default function Scene3D(p: Props) {
       lm.resolution.set(r.width || 1440, r.height || 900)
       s.lineMaterials.push(lm)
       s.lineGroup.add(new LineSegments2(g, lm))
+      buckets.push({ geo: g, instanced: true, edgeTs: ts, segs: CURVE_SEGMENTS })
     }
-    fat(mid, 2, EDGE_MID)
-    fat(thick, 3.5, EDGE_THICK)
+    fat(mid, 2, EDGE_MID, tsOf.mid)
+    fat(thick, 3.5, EDGE_THICK, tsOf.thick)
+    s.reveal = { buckets, nodeTs: arr.map((n) => nodeFirst.get(n.id) ?? 0) }
+    s.revealedNodes = Infinity
     s.drawnEdges = links.length
     // fog around the layout size
     ;(s.scene.fog as THREE.Fog).near = layout.radius * 2.6 + 300
@@ -575,7 +649,9 @@ export default function Scene3D(p: Props) {
     if (!s || !s.layout) return
     const R = s.layout.radius
     if (s.layout.nodes.size === 0) return
-    const selectionChanged = lastSelRef.current !== p.selection || lastNonceRef.current !== p.focusNonce
+    const revealChanged = lastRevealRef.current !== (p.revealAt ?? null) && !p.selection
+    lastRevealRef.current = p.revealAt ?? null
+    const selectionChanged = lastSelRef.current !== p.selection || lastNonceRef.current !== p.focusNonce || revealChanged
     const panelChanged = lastPanelRef.current !== !!p.panelOpen
     lastPanelRef.current = !!p.panelOpen
     const radiusJump = Math.abs(R - framedRadius.current) / Math.max(1, framedRadius.current) > 0.6
@@ -604,8 +680,23 @@ export default function Scene3D(p: Props) {
       ;(s as unknown as { loop: () => void }).loop()
     }
     if (!p.selection) {
-      // OVERVIEW: the whole slab from a 3/4 angle; no orbit, no rotation
-      fly([{ pos: new THREE.Vector3(0.18 * R, -0.5 * R, 1.75 * R + 200), look: new THREE.Vector3(0, 0, 0), dur: 900, onDone: () => propsRef.current.onViewState('overview') }])
+      // OVERVIEW: the whole slab from a 3/4 angle. After arriving, one slow bounded drift (6 degrees over
+      // 9 s) that stops on its own: scale and depth without an endless orbit.
+      const home = new THREE.Vector3(0.18 * R, -0.5 * R, 1.75 * R + 200)
+      const drifted = home.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), 0.105)
+      // with a HUD on the right, look a little to the right so the network sits in the free part of the frame
+      const W = s.renderer.domElement.getBoundingClientRect().width || 1440
+      const hud = Math.min(0.45, (p.hudRight ?? 0) / W)
+      const visW = 2 * home.length() * Math.tan((s.camera.fov * Math.PI) / 360) * s.camera.aspect
+      const origin = new THREE.Vector3(visW * hud * 0.5, 0, 0)
+      const revealing = p.revealAt && performance.now() - p.revealAt < REVEAL_MS
+      if (revealing) {
+        // build-up: start far out and dolly in while the graph appears in time order
+        const far = new THREE.Vector3(0.3 * R, -0.7 * R, 2.6 * R + 400)
+        fly([{ pos: far, look: origin, dur: 1 }, { pos: home, look: origin, dur: REVEAL_MS, onDone: () => propsRef.current.onViewState('overview') }, { pos: drifted, look: origin, dur: 9000 }])
+      } else {
+        fly([{ pos: home, look: origin, dur: 900, onDone: () => propsRef.current.onViewState('overview') }, { pos: drifted, look: origin, dur: 9000 }])
+      }
       return
     }
     if (p.selection.kind === 'edge') {
@@ -649,7 +740,7 @@ export default function Scene3D(p: Props) {
     const N = new THREE.Vector3(n.x, n.y, n.z)
     fly([{ pos: N.clone().add(new THREE.Vector3(90, -220, 520)), look: N.clone(), dur: 1100, onDone: () => propsRef.current.onViewState('evidence') }])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen])
+  }, [p.selection, p.focusNonce, p.reducedMotion, layoutVersion, p.panelOpen, p.revealAt, p.hudRight])
 
   // ---- pulses: one travelling marker per newly observed batch on an edge ----
   useEffect(() => {

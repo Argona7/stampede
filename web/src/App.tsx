@@ -3,11 +3,13 @@ import { api } from './client'
 import Caption from './components/Caption'
 import Controls, { type Filters } from './components/Controls'
 import Details, { SequenceRow } from './components/Details'
+import Tape, { type TapeApi } from './components/Tape'
 import MapCanvas from './components/MapCanvas'
 import Ticker from './components/Ticker'
 import TopStrip from './components/TopStrip'
 import Scene3D, { type PerfStats, type Pulse, type ViewState } from './scene/Scene3D'
 import { sessionApi } from './session'
+import { utc, windowName } from './format'
 import type { EdgeDetail, Graph, Recent, Selection, SeqEvent, SessionState, Status, TokenDetail } from './types'
 
 const SESSION_POLL_MS = 1000
@@ -40,6 +42,9 @@ export default function App() {
   const [perf, setPerf] = useState<PerfStats | null>(null)
   const [reduced] = useState(prefersReducedMotion() || params.get('motion') === 'reduce')
   const cursorRef = useRef<string | null>(null)
+  const tapeRef = useRef<TapeApi | null>(null)
+  const [revealAt, setRevealAt] = useState<number | null>(null)
+  const [showTape, setShowTape] = useState(params.get('tape') !== '0')
   const lastClockRef = useRef<{ clock: number; wall: number; id: string } | null>(null)
   const inFlight = useRef(false)
   const showPerf = params.get('perf') === '1'
@@ -147,9 +152,14 @@ export default function App() {
         if (historyOnly) {
           setFeed(rows.slice(-200))
           setFreshRows(new Set())
+          // boot: the whole visible history streams through the tape and the scene builds up in time order
+          const lo = clock - session.span_s
+          tapeRef.current?.boot(rows, `${utc(lo)} → ${utc(clock)} UTC · ${session.mode === 'live' ? 'LIVE' : `REPLAY ${session.speed}×`} · window ${windowName(session.window_s)}`)
+          setRevealAt(performance.now())
         } else if (rows.length) {
           setFeed((f) => [...f, ...rows].slice(-200))
           setFreshRows(new Set(rows.map((r) => String(r.id))))
+          tapeRef.current?.push(rows)
           // one pulse per edge per batch: N = accepted rows on that edge in this poll
           const perEdge = new Map<string, number>()
           for (const r of rows) perEdge.set(`${r.from}->${r.to}`, (perEdge.get(`${r.from}->${r.to}`) ?? 0) + 1)
@@ -217,6 +227,7 @@ export default function App() {
       if (e.key === 'Escape') select(null)
       else if (e.key === 'e' || e.key === 'E') setEvidenceOpen((v) => !v)
       else if (e.key === 'p' || e.key === 'P') setLayout((l) => (l === 'presentation' ? 'explore' : 'presentation'))
+      else if (e.key === 't' || e.key === 'T') setShowTape((v) => !v)
       else if (e.key === ' ' && session?.controls) {
         e.preventDefault()
         control('toggle')
@@ -251,7 +262,7 @@ export default function App() {
       <TopStrip status={status} session={session} statusError={statusError} layout={layout} renderer={renderer} edgesShown={edgesShown} edgesTotal={edgesTotal} onLayout={setLayout} onRenderer={setRenderer} onControl={control} onSelect={select} />
       <main className="main">
         {!presentation && <Controls status={status} graph={graph} filters={filters} setFilters={setFilters} bounds={bounds} session={session} onControl={control} />}
-        <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''}`} aria-label="Rotation map">
+        <section className={`map ${presentation && (edge || token) ? 'has-caption' : ''} ${presentation && showTape && !evidenceOpen ? 'has-tape' : ''}`} aria-label="Rotation map">
           {renderer === '3d' ? (
             <Scene3D
               nodes={graph?.nodes ?? []}
@@ -268,9 +279,17 @@ export default function App() {
               focusNonce={focusNonce}
               labelBudget={presentation ? 14 : 22}
               panelOpen={presentation && evidenceOpen}
+              revealAt={revealAt}
+              revealRange={fromTs !== null && toTs !== null ? { from: fromTs, to: toTs } : null}
+              hudRight={presentation && showTape && !evidenceOpen ? 470 : 0}
             />
           ) : (
             <MapCanvas nodes={graph?.nodes ?? []} edges={graph?.edges ?? []} selection={selection} showAmbiguous={filters.showAmbiguous} fresh={new Map(pulses.map((p) => [p.key, p.at]))} onSelect={select} onHover={setHover} focusNonce={focusNonce} />
+          )}
+          {presentation && showTape && !evidenceOpen && (
+            <div className="tape-wrap" aria-label="Observed sequences tape">
+              <Tape onReady={(api) => (tapeRef.current = api)} />
+            </div>
           )}
           <div className="corner">
             <span>

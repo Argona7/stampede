@@ -156,8 +156,8 @@ def test_seek_rebuilds_history_without_marking_it_fresh():
             fake.clock = 5200  # a seek far ahead of anything playback could explain
             fake.rev += 1
             await until(lambda: set(app.events) == {5, 6})
+            await until(lambda: table.row_count == 2)  # history streams in, then the table holds exactly the new range
             await pilot.pause()
-            assert table.row_count == 2
             assert app.fresh_ids == set() and app.last_events_kind == "history"
 
     run(body())

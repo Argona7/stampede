@@ -144,3 +144,19 @@ def test_interp_never_invents_1970():
     assert it(1100) == (50_010, 0)  # 100 blocks * 0.1 s extrapolated, marked inexact
     assert it(1000 + 601) == (None, 0)  # too far to guess
     assert it(300) == (None, 0)
+
+
+# ---- names ----
+def test_duplicate_tickers_are_disambiguated_by_address(tmp_path):
+    s = Store(tmp_path / "n.sqlite")
+    seed(s, [(1000, TOKEN_A, "0xw1", "sell"), (1100, TOKEN_B, "0xw1", "buy")])
+    s.db.execute("UPDATE tokens SET symbol='MARIO' WHERE address IN (?, ?)", (TOKEN_A, TOKEN_B))
+    s.commit()
+    rotate(s, W)
+    labels = queries.token_labels(s, {TOKEN_A, TOKEN_B, TOKEN_C})
+    assert labels[TOKEN_A]["symbol"] == f"MARIO·{TOKEN_A[-4:]}" and labels[TOKEN_B]["symbol"] == f"MARIO·{TOKEN_B[-4:]}"
+    assert labels[TOKEN_A]["symbol_raw"] == "MARIO" and labels[TOKEN_C]["symbol"] == "CCC"  # unique tickers stay as they are
+    ev = queries.events(s, W, until=1100, after=None, backfill_s=300)["events"][0]
+    assert ev["from_symbol"] != ev["to_symbol"]  # never "MARIO -> MARIO" for two different coins
+    hits = queries.search(s, "mario")
+    assert len(hits) == 2 and len({h["symbol"] for h in hits}) == 2

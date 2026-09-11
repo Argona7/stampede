@@ -369,6 +369,19 @@ input[type='range'] {
   white-space: nowrap;
 }
 
+.tape-wrap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 470px;
+  pointer-events: none;
+}
+
+.tape {
+  display: block;
+}
+
 .corner {
   position: absolute;
   top: 10px;
@@ -434,6 +447,15 @@ input[type='range'] {
   bottom: 40px;
   max-width: 62%;
   pointer-events: none;
+}
+
+.map.has-tape .legend span:last-child,
+.map.has-tape .perf {
+  display: none;
+}
+
+.map.has-tape .legend {
+  right: 490px;
 }
 
 .map.has-caption .legend span:first-child {

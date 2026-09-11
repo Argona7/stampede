@@ -142,17 +142,29 @@ def coverage_summary(store: Store) -> dict[str, Any]:
     }
 
 
+def duplicate_symbols(store: Store) -> set[str]:
+    """Symbols used by more than one token in the store (PONS lets anyone reuse a ticker: RBNHD x28, MARIO x13...)."""
+    return {r[0] for r in store.db.execute("SELECT symbol FROM tokens WHERE symbol IS NOT NULL AND symbol<>'' GROUP BY symbol HAVING COUNT(*)>1")}
+
+
+def disambiguate(symbol: str, address: str, dups: set[str]) -> str:
+    """`MARIO` -> `MARIO·9b72` (last 4 hex of the address) when several coins share the ticker, so A -> B is never two different coins with one name."""
+    return f"{symbol}·{address[-4:]}" if symbol in dups else symbol
+
+
 def token_labels(store: Store, addrs: set[str]) -> dict[str, dict]:
     if not addrs:
         return {}
     out: dict[str, dict] = {}
+    dups = duplicate_symbols(store)
     lst = list(addrs)
     for i in range(0, len(lst), 500):
         chunk = lst[i : i + 500]
         for r in store.db.execute(f"SELECT address, symbol, name, source FROM tokens WHERE address IN ({','.join('?' * len(chunk))})", chunk):
-            out[r[0]] = {"address": r[0], "symbol": r[1] or "?", "name": r[2] or "", "source": r[3], "short": short(r[0])}
+            raw = r[1] or "?"
+            out[r[0]] = {"address": r[0], "symbol": disambiguate(raw, r[0], dups), "symbol_raw": raw, "name": r[2] or "", "source": r[3], "short": short(r[0]), "ambiguous_symbol": raw in dups}
     for a in addrs:
-        out.setdefault(a, {"address": a, "symbol": "?", "name": "", "source": None, "short": short(a)})
+        out.setdefault(a, {"address": a, "symbol": "?", "symbol_raw": "?", "name": "", "source": None, "short": short(a), "ambiguous_symbol": False})
     return out
 
 
@@ -428,4 +440,5 @@ def search(store: Store, text: str, limit: int = 20) -> list[dict]:
         "SELECT address, symbol, name FROM tokens WHERE lower(symbol) LIKE ? OR lower(name) LIKE ? OR address LIKE ? ORDER BY CASE WHEN lower(symbol)=? THEN 0 ELSE 1 END, symbol LIMIT ?",
         (f"%{t}%", f"%{t}%", f"{t}%", t, limit),
     ).fetchall()
-    return [{"address": r[0], "symbol": r[1] or "?", "name": r[2] or "", "short": short(r[0])} for r in rows]
+    dups = duplicate_symbols(store)
+    return [{"address": r[0], "symbol": disambiguate(r[1] or "?", r[0], dups), "symbol_raw": r[1] or "?", "name": r[2] or "", "short": short(r[0])} for r in rows]

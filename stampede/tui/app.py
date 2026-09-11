@@ -123,8 +123,13 @@ class StampedeTUI(App):
         self.last_events_kind = "history"
         self.spark_values: list[float] = []
         self._pending_poll = False
-        self._sym_w = 14
+        self._sym_w = 16
         self._columns_narrow: bool | None = None
+        self._stream_queue: list[dict[str, Any]] = []  # history rows still to be added (streamed in over STREAM_S)
+        self._stream_total = 0
+        self._stream_done = 0
+        self._stream_started = 0.0
+        self._stream_timer = None
 
     # ---- layout ----
     def compose(self) -> ComposeResult:
@@ -154,6 +159,7 @@ class StampedeTUI(App):
         table.focus()
         self.render_brand()
         self.render_status()
+        self.render_feedhead()
         self.render_detail()
         self.render_keys()
         self.render_hot()
@@ -166,7 +172,7 @@ class StampedeTUI(App):
 
     def _setup_columns(self, table: DataTable) -> None:
         narrow = self._narrow()
-        self._sym_w = 10 if narrow else 14
+        self._sym_w = 11 if narrow else 16
         table.add_column("", key="mark", width=1)
         table.add_column("TIME UTC", key="time", width=9)
         table.add_column("WALLET", key="wallet", width=11)
@@ -207,10 +213,13 @@ class StampedeTUI(App):
             span = int(sess.get("span_s") or 1800)
             seek = self._is_seek(sess)
             after = None if seek or self.cursor is None else self.cursor
-            ev = self.client.events(w, clock, after, limit=500, backfill_s=span)
+            ev = self.client.events(w, clock, after, limit=2000, backfill_s=span)
             pages = [ev]
-            while ev.get("has_more") and len(pages) < 10:
-                ev = self.client.events(w, clock, ev["next_cursor"], limit=500, backfill_s=span)
+            kind0 = ev.get("kind")
+            while ev.get("has_more") and len(pages) < 25:  # to the end: an unfinished history must not resurface as "new"
+                ev = self.client.events(w, clock, ev["next_cursor"], limit=2000, backfill_s=span)
+                if kind0 == "history":
+                    ev["kind"] = "history"
                 pages.append(ev)
             out["events"] = pages
             out["seek"] = seek
@@ -252,6 +261,7 @@ class StampedeTUI(App):
             table.clear()
             self.events.clear()
             self.fresh_ids.clear()
+            self._stream_queue.clear()
             self.follow = True
         else:
             self.fresh_ids.clear()
@@ -260,18 +270,23 @@ class StampedeTUI(App):
                     self.events[eid]["_fresh"] = False
                     self._refresh_mark(table, eid)
         new_ids: list[int] = []
+        history_rows: list[dict[str, Any]] = []
         for page in pages:
             for e in page.get("events", []):
                 if e["id"] in self.events:
                     continue
                 e["_fresh"] = page.get("kind") == "new"
                 self.events[e["id"]] = e
-                if self._matches_filter(e):
+                if not e["_fresh"]:
+                    history_rows.append(e)  # streamed in below, in time order, like a tape catching up
+                elif self._matches_filter(e):
                     self._add_row(table, e)
                 if e["_fresh"]:
                     new_ids.append(e["id"])
             if page.get("next_cursor"):
                 self.cursor = page["next_cursor"]
+        if history_rows:
+            self._start_stream(history_rows)
         self.fresh_ids = set(new_ids)
         self.last_events_kind = "new" if new_ids else "history"
         if self.follow and table.row_count:
@@ -292,6 +307,42 @@ class StampedeTUI(App):
         self.api_error = msg
         self.error_count += 1
         self.render_status()
+
+    # ---- streaming a history load into the table (no clear, rows fly in over ~2.5 s) ----
+    STREAM_S = 3.0  # cap: a history load flies in over up to this many seconds, whatever the tick rate
+
+    def _start_stream(self, rows: list[dict[str, Any]]) -> None:
+        self._stream_queue.extend(sorted(rows, key=lambda x: (x["buy_ts"], x["id"])))
+        self._stream_total = len(self._stream_queue)
+        self._stream_started = time.time()
+        self._stream_done = 0
+        if self._stream_timer is None:
+            self._stream_timer = self.set_interval(1 / 25, self._stream_tick)
+
+    def _stream_tick(self) -> None:
+        table = self.query_one("#feed", DataTable)
+        if not self._stream_queue:
+            if self._stream_timer is not None:
+                self._stream_timer.stop()
+                self._stream_timer = None
+            self.render_feedhead()
+            self.render_activity()
+            return
+        dur = min(self.STREAM_S, 0.3 + self._stream_total / 2500)  # tiny loads are instant, big ones take ~3 s
+        t = min(1.0, (time.time() - self._stream_started) / dur)
+        eased = 1 - (1 - t) ** 3
+        target = int(self._stream_total * eased) if t < 1 else self._stream_total
+        n = max(0, target - self._stream_done)
+        for e in self._stream_queue[:n]:
+            if self._matches_filter(e):
+                self._add_row(table, e)
+        del self._stream_queue[:n]
+        self._stream_done += n
+        if self.follow and table.row_count:
+            table.move_cursor(row=table.row_count - 1, scroll=True)
+        self.render_feedhead()
+        if n and self._stream_done % 400 < n:
+            self.render_activity(streaming=True)
 
     # ---- rows ----
     def _row_cells(self, e: dict[str, Any]) -> list[Text]:
@@ -384,10 +435,18 @@ class StampedeTUI(App):
     def render_feedhead(self) -> None:
         n = len(self.events)
         shown = self.query_one("#feed", DataTable).row_count
+        if self.session is None and not self.api_error:
+            self.query_one("#feedhead", Static).update(Text("CONNECTING TO API · loading the visible history…", style=SECONDARY))
+            return
         s = self.session or {}
         span = dur(s.get("span_s") or 1800)
         flt = f" · FILTER '{self.filter_text}'" if self.filter_text else ""
         fresh = f" · +{len(self.fresh_ids)} new" if self.fresh_ids else ""
+        if self._stream_queue:
+            head = Text(f"STREAMING {shown:,} / {n:,} OBSERVED SEQUENCES · last {span}", style=f"bold {TEXT}")
+            head.append(f" · {'█' * min(40, int(40 * shown / max(1, n)))}{'·' * (40 - min(40, int(40 * shown / max(1, n))))}", style=PRIMARY)
+            self.query_one("#feedhead", Static).update(head)
+            return
         self.query_one("#feedhead", Static).update(Text(f"OBSERVED SEQUENCES · last {span} · {shown} of {n} rows{flt}{fresh} · one row = one wallet that sold A, then bought B · ≈ interpolated block time", style=SECONDARY))
 
     def render_detail(self) -> None:
@@ -461,7 +520,7 @@ class StampedeTUI(App):
             self.hot_prev_at = now
         self.query_one("#hot", Static).update(t)
 
-    def render_activity(self) -> None:
+    def render_activity(self, streaming: bool = False) -> None:
         s = self.session or {}
         clock = s.get("clock_ts")
         span = int(s.get("span_s") or 1800)
@@ -470,7 +529,10 @@ class StampedeTUI(App):
         nb = max(1, span // BUCKET_S)
         buckets = [0.0] * nb
         lo = clock - span
+        pending = {e["id"] for e in self._stream_queue} if streaming else set()
         for e in self.events.values():
+            if e["id"] in pending:
+                continue
             i = int((e["buy_ts"] - lo) // BUCKET_S)
             if 0 <= i < nb:
                 buckets[i] += 1
