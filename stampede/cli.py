@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", required=True)
     p.add_argument("--from-block", type=int, required=True)
     p.add_argument("--to-block", type=int, required=True)
-    p.add_argument("--endpoints", nargs="*", default=None, help="endpoint names (blockmachine ordofi official nodeflare pocket) or URLs; default: blockmachine ordofi official (docs/BACKFILL.md)")
+    p.add_argument("--endpoints", nargs="*", default=None, help="endpoint names (blockmachine ordofi official nodeflare pocket) or URLs; default: blockmachine ordofi (docs/BACKFILL.md)")
     p.add_argument("--chunk", type=int, default=10_000, help="blocks per chunk (two getLogs each); endpoints with a smaller span split it")
     p.add_argument("--workers", type=int, default=3, help="chunks in flight (threads); the store is written in block order by the main thread")
     p.add_argument("--label", default=None)

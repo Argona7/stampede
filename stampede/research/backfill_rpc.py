@@ -62,8 +62,9 @@ KNOWN_ENDPOINTS: dict[str, dict[str, Any]] = {
     "blockmachine": {"url": "https://rpc-robinhood.blockmachine.io", "pace": 0.5, "span": 10_000, "inflight": 2, "addresses": 1500, "cu": 300},
     # 4-11 s per 5k-block query, "-32005 the network is busy" under load, 10k spans refused
     "ordofi": {"url": "https://rpc.ordofi.network", "pace": 5.0, "span": 5_000, "inflight": 1, "addresses": 1500},
-    # 429 bursts at less than ~4 s pacing, 10k-log cap per answer, blockTimestamp always 0x0 (a block served only by
-    # this endpoint takes the header fallback); small bites, but additive
+    # opt-in: 429 bursts below ~4 s pacing, 10k-log cap per answer (750 blocks in busy periods), 300 addresses per
+    # Transfer query, blockTimestamp always 0x0. In a pool it multiplies the request count of a chunk (a 10k-block
+    # transfer phase became 60+ calls) and starves the cursor; alone it is a slow but working fallback
     "official": {"url": chain.PUBLIC_RPC, "pace": 4.0, "span": 1_500, "inflight": 1, "addresses": 300},
     # opt-in: keyless tier allows 17 "heavy" calls (eth_getLogs) per day and 1 request per 10 s; with a free key it is
     # the best endpoint measured (30k-block spans, 148 MB answers, blockTimestamp present)
@@ -71,7 +72,7 @@ KNOWN_ENDPOINTS: dict[str, dict[str, Any]] = {
     # opt-in: relay errors on most historical queries ("historical state is not available")
     "pocket": {"url": "https://robinhood.api.pocket.network", "pace": 1.0, "span": 1_000, "inflight": 1, "addresses": 300},
 }
-DEFAULT_ENDPOINTS = ["blockmachine", "ordofi", "official"]
+DEFAULT_ENDPOINTS = ["blockmachine", "ordofi"]
 
 
 def _hex_int(v: Any) -> int:

@@ -28,7 +28,7 @@ per call. They are metered per IP, so the interesting number is not latency but 
 |---|---|---|---|---|---|
 | `rpc-robinhood.blockmachine.io` | 1,510 logs, 0.5 s | 10,000 (`-32602 max_blocks=10000`); answers above 50 MiB refused (`-32003 response too large`) | **300 CU/min per IP** (`429`, body carries `limit/remaining/reset/retry_after_ms`, `Retry-After`); eth_getLogs ≈ 20-25 CU → 12-15 calls/min; 10k blocks of swap-class logs in 1.2-3.9 s when allowed | yes | primary |
 | `rpc.ordofi.network` | 1,510 logs, 3.2 s | 5,000 (10k → `-32005 the network is busy`) | no explicit limit; 4-11 s per 5k-block query, `busy` / `log query timed out` under load (≈ half the calls at 3 concurrent) | yes | secondary |
-| `rpc.mainnet.chain.robinhood.com` (official) | 1,510 logs, 1.4 s | 10,000-log cap per answer → 750-1,500 blocks in busy periods | `429 Too Many Requests` in bursts below ~3-4 s pacing; `log query timed out` for 800 addresses × 10k blocks | **always `0x0`** | additive (small bites; a block served only by it takes the header fallback) |
+| `rpc.mainnet.chain.robinhood.com` (official) | 1,510 logs, 1.4 s | 10,000-log cap per answer → 750-1,500 blocks in busy periods; 300 addresses per Transfer query | `429 Too Many Requests` in bursts below ~3-4 s pacing; `log query timed out` for 800 addresses × 10k blocks | **always `0x0`** | opt-in: in a pool its small bites multiplied a chunk's request count (a 10k-block transfer phase became 60+ calls) and stalled the cursor for 7 min; alone it is a slow fallback |
 | `rpc.nodeflare.app/robinhood/public` | 1,510 logs, 0.1 s | ≥ 30,000 (173k logs / 148 MB in 13.9 s) | keyless: 1 request / 10 s per IP **and 17 "heavy" calls (eth_getLogs) per day**, then `403 method_not_supported` | yes | opt-in; the best endpoint measured *with a free key* (2M CU/month, sign-up) |
 | `robinhood.api.pocket.network` | 1,510 logs, 2.6 s | – | `-31001 relay error` / `historical state is not available` on 9 of 10 historical calls; batch headers work | yes | opt-in, not used |
 | `lb.routeme.sh/rpc/evm/4663` | – | – | `-32029 public rate limit exceeded — sign up`; getLogs only 52 blocks from tip | – | dropped |
@@ -49,7 +49,7 @@ per answer** is. Server-side poolId filtering (topic1 list of the 7,156 PONS poo
 ## How `backfill-rpc` works
 
 ```
-stampede backfill-rpc --db <store> --from-block A --to-block B [--endpoints blockmachine ordofi official] [--chunk 10000] [--workers 3]
+stampede backfill-rpc --db <store> --from-block A --to-block B [--endpoints blockmachine ordofi] [--chunk 10000] [--workers 3]
 ```
 
 1. **Lifecycle pass** (only for blocks after the store's `backfill_lifecycle_cursor`, 30-day lookback like the HyperSync path):
@@ -145,11 +145,17 @@ Finisher `/tmp/hs-finish-rpc.sh` (`python scripts/bg.py backfill-finish -- /bin/
 plus `infra`; wallets are verified against `trades` and recomputed if they drifted), sets `sample_from_block` /
 `sample_to_block` / `backfill_cursor`, then the streaming rotate 300 / 1800, `stampede fx --days 15`, and writes `READY`.
 
-Observed combined throughput of the three RPC workers: ~400 blocks/s (blockmachine ≈ 9-12 answers/min at 2.5-5k blocks
-each, ordofi ≈ 5/min, official ≈ 6-10/min at 750 blocks), plus HyperSync C2 at 60-150 blocks/s; the shared pacer removed
-the 429 churn (0 blockmachine 429s after it was introduced). A single worker alone bursts to 2,300 blocks/s until the
-blockmachine minute quota is spent. Blocks in the busy segments carry twice the logs of the quiet ones, so the same
-request budget buys half the blocks there. ETA from the cursors at 16:45Z: A′ ~3.5 h, B ~4.5 h, C ~3.5 h, C2 ~2 h.
+Observed combined throughput of the three RPC workers (16:50-16:55Z, blockmachine + ordofi): **~400 blocks/s**
+(100k blocks in 253 s; blockmachine ≈ 10-12 answers/min at 2.5-5k blocks each, ordofi ≈ 5-6/min at 2.5-5k with a third of
+its calls `busy`), plus HyperSync C2 at 120-150 blocks/s in its burst (55-90 after): **~500-550 blocks/s combined**, 5-6× the
+single HyperSync worker. A single RPC worker alone bursts to 2,300 blocks/s until the blockmachine minute quota is spent;
+the shared pacer removed the 429 churn between the three processes. Blocks in the busy segments (52.9M+) carry twice the
+logs of the quiet ones, so the same request budget buys half the blocks there. Remaining at 16:55Z: A′ 3.7M, B 3.9M, C
+3.0M blocks over RPC (~7-8 h at 400 blocks/s combined), C2 0.85M over HyperSync (~2 h). Each restart of a worker loses its
+in-flight chunks (3-5 min of fetching), so the finisher restarts a worker only when it is not running.
+
+What would raise the ceiling: a free nodeflare key (30k-block answers, 1 request/10 s → ~1,500 blocks/s on its own); a
+second machine with another IP (the quotas are per IP); a second HyperSync token.
 
 ## Operating notes
 
