@@ -479,11 +479,11 @@ Verified in the final interface (`Space` and the letters work when no text field
 
 | Key | Where | Action |
 |---|---|---|
-| `1` `2` `3` | everywhere | RADAR / FLOW / MAP |
+| `1` `2` `3` `4` | everywhere | RADAR / FLOW / MAP / TRADERS |
 | `←` `→` `Home` `End` | view tabs focused | move between the tabs |
-| `↑` `↓` | RADAR | move the coin selection (the drawer follows) |
-| `Enter` | RADAR | open FLOW for the selected coin |
-| `D` | RADAR, FLOW | show / hide the coin drawer |
+| `↑` `↓` | RADAR, TRADERS | move the coin / wallet selection (the drawer or card follows) |
+| `Enter` | RADAR, TRADERS | open FLOW for the selected coin / the wallet card |
+| `D` | RADAR, FLOW, TRADERS | show / hide the coin drawer / wallet card |
 | `Esc` | everywhere | close the drawer → back to RADAR from FLOW → clear the selection |
 | `Space` | everywhere | play / pause the shared clock |
 | `E` | MAP (presentation) | open / hide the evidence rows of the selected route |

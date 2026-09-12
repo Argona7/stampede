@@ -18,6 +18,7 @@ uv run stampede report                                    # docs/COVERAGE.md + d
 uv run stampede repair-ts                                 # fetch block headers for trades with unknown time
 uv run stampede sync-lifecycle                            # TokenLaunched / PoolRegistered logs -> launches, graduations
 uv run stampede wallet-scores --from data/research.sqlite # copy wallet quality from a research store
+uv run stampede traders --db data/research-14d.sqlite --out docs/RESEARCH-TRADERS.md   # FIFO ledgers with fees -> wallet_stats / wallet_positions, walk-forward, copy-test (--fees estimate for stores without fee columns)
 uv run stampede export-demo [--windows 1800]              # pack the recorded sample into data/demo/stampede-demo.sqlite.xz
 uv run stampede serve --mode fixture|replay|live [--speed 10] [--context live|always|off] [--notify]
 
@@ -37,13 +38,13 @@ downloads the bundle from when `data/demo/` has none).
 
 ## Keys
 
-Terminal: `↑/↓` select, `Enter` open evidence / coin card, `Esc` back (filter → summary → table), `Tab`/`Shift+Tab` panes,
-`1`/`2` FEED / RADAR screens, `/` search, `End`/`Home` follow latest / first row, `u g s a` radar presets, `r` refresh coin
-context, `space` play/pause, `←/→` seek 60 s, `[ ]` speed, `q` or `Ctrl+C` quit.
+Terminal: `↑/↓` select, `Enter` open evidence / coin card / wallet card, `Esc` back (filter → summary → table), `Tab`/`Shift+Tab` panes,
+`1`/`2`/`3` FEED / RADAR / TRADERS screens, `/` search, `End`/`Home` follow latest / first row, `u g s a` radar presets,
+`t m n b` trader presets (top / smart / snipers / bots), `r` refresh coin context, `space` play/pause, `←/→` seek 60 s, `[ ]` speed, `q` or `Ctrl+C` quit.
 
-Web: `1 2 3` RADAR / FLOW / MAP, click a row or a ribbon, `D` coin drawer, `E` evidence rows, `Esc` back,
-`P` presentation/explore (MAP), `T` tape, `A` autopilot, `space` play/pause. URL parameters: `?view=radar|flow|map`,
-`?layout=presentation`, `?autopilot=1`.
+Web: `1 2 3 4` RADAR / FLOW / MAP / TRADERS, click a row or a ribbon, `D` coin drawer / wallet card, `E` evidence rows, `Esc` back,
+`P` presentation/explore (MAP), `T` tape, `A` autopilot, `space` play/pause. URL parameters: `?view=radar|flow|map|traders`,
+`?wallet=0x…` (opens the wallet card), `?layout=presentation`, `?autopilot=1`.
 
 ## API
 
