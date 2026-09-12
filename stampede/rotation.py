@@ -61,17 +61,27 @@ def sequences_for_wallet(trades: list[T], window_s: int) -> list[dict]:
     for s in sells:
         sold_in_tx[s.tx].add(s.token)
 
-    def other_buy_between(p_lo: int, p_hi: int, token: str) -> list[str]:
-        """tokens (except `token`) bought strictly between positions p_lo and p_hi."""
-        import bisect as _b
+    import bisect as _b
 
+    def other_buys_between(p_lo: int, p_hi: int, token: str) -> int:
+        """How many buys of tokens other than `token` sit strictly between positions p_lo and p_hi. O(log n)."""
         i, j = _b.bisect_right(buy_pos, p_lo), _b.bisect_left(buy_pos, p_hi)
         if j <= i:
-            return []
+            return 0
         same = _b.bisect_left(buy_pos_by_token[token], p_hi) - _b.bisect_right(buy_pos_by_token[token], p_lo)
-        if (j - i) - same <= 0:
-            return []
-        return sorted({order[buy_pos[k]].token for k in range(i, j) if order[buy_pos[k]].token != token})
+        return max(0, (j - i) - same)
+
+    def other_buy_between(p_lo: int, p_hi: int, token: str, limit: int = 20) -> list[str]:
+        """The distinct other tokens bought between the two positions (only materialised for rows that are emitted)."""
+        i, j = _b.bisect_right(buy_pos, p_lo), _b.bisect_left(buy_pos, p_hi)
+        seen: set[str] = set()
+        for k in range(i, j):
+            t = order[buy_pos[k]].token
+            if t != token:
+                seen.add(t)
+                if len(seen) >= limit:
+                    break
+        return sorted(seen)
 
     out: list[dict] = []
     # sliding window over sells: last sell per token inside [b.ts - W, b.ts] and before b in order
@@ -101,15 +111,16 @@ def sequences_for_wallet(trades: list[T], window_s: int) -> list[dict]:
         cands.sort(key=lambda kv: (kv[1].ts, kv[1].block, kv[1].id), reverse=True)
         single = len(sold_tokens) == 1
         for n, (a_token, s) in enumerate(cands):
-            between = other_buy_between(pos[s.id], pb, b.token)
+            n_between = other_buys_between(pos[s.id], pb, b.token)
             if s.tx == b.tx:
                 grade = "direct" if sold_in_tx[b.tx] == {a_token} else "ambiguous"
-            elif single and not between:
+            elif single and n_between == 0:
                 grade = "clean"
             else:
                 grade = "ambiguous"
             if grade == "ambiguous" and n >= MAX_AMBIGUOUS_CANDIDATES:
                 continue
+            between = other_buy_between(pos[s.id], pb, b.token) if (grade == "ambiguous" and n_between) else []
             out.append({
                 "sell_token": a_token,
                 "buy_token": b.token,
@@ -124,21 +135,56 @@ def sequences_for_wallet(trades: list[T], window_s: int) -> list[dict]:
     return out
 
 
-def rotate(store: Store, window_s: int) -> dict[str, Any]:
+SEQ_INSERT = "INSERT OR IGNORE INTO sequences(window_s,wallet,sell_token,buy_token,sell_trade,buy_trade,sell_ts,buy_ts,gap_s,grade,candidates) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
+
+
+def rotate(store: Store, window_s: int, progress=None) -> dict[str, Any]:
+    """Streams the trades wallet by wallet (index order `trades_wallet(wallet, ts)`), so a 40-million-row research
+    store needs the memory of one wallet, not of the table. A separate read connection feeds the loop while the
+    main connection writes sequences in batches."""
     store.db.execute("DELETE FROM sequences WHERE window_s=?", (window_s,))
     store.db.execute("DELETE FROM edges WHERE window_s=?", (window_s,))
-    by_wallet: dict[str, list[T]] = defaultdict(list)
-    for tid, tx, block, ts, token, wallet, side in store.db.execute("SELECT id, tx_hash, block, ts, token, wallet, side FROM trades WHERE ts IS NOT NULL AND ts>0"):
-        by_wallet[wallet].append(T(tid, tx, block, ts, token, side))
+    store.commit()
+    import sqlite3
+
+    reader = sqlite3.connect(f"file:{store.path}?mode=ro", uri=True) if str(store.path) != ":memory:" else store.db
+    cur = reader.execute("SELECT id, tx_hash, block, ts, token, wallet, side FROM trades WHERE ts IS NOT NULL AND ts>0 ORDER BY wallet, ts, block, id")
     rows: list[tuple] = []
-    n_wallets_with_both = 0
-    for wallet, trades in by_wallet.items():
-        if not any(t.side == "sell" for t in trades) or not any(t.side == "buy" for t in trades):
-            continue
+    n_wallets = n_wallets_with_both = 0
+    current: str | None = None
+    buf: list[T] = []
+
+    def flush_wallet(wallet: str, trades: list[T]) -> None:
+        nonlocal n_wallets_with_both
+        has_sell = any(t.side == "sell" for t in trades)
+        has_buy = any(t.side == "buy" for t in trades)
+        if not (has_sell and has_buy):
+            return
         n_wallets_with_both += 1
         for s in sequences_for_wallet(trades, window_s):
             rows.append((window_s, wallet, s["sell_token"], s["buy_token"], s["sell_trade"], s["buy_trade"], s["sell_ts"], s["buy_ts"], s["gap_s"], s["grade"], s["candidates"]))
-    store.db.executemany("INSERT OR IGNORE INTO sequences(window_s,wallet,sell_token,buy_token,sell_trade,buy_trade,sell_ts,buy_ts,gap_s,grade,candidates) VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows)
+
+    for tid, tx, block, ts, token, wallet, side in cur:
+        if wallet != current:
+            if buf and current is not None:
+                flush_wallet(current, buf)
+            buf = []
+            current = wallet
+            n_wallets += 1
+            if len(rows) >= 20000:
+                store.db.executemany(SEQ_INSERT, rows)
+                store.commit()
+                rows = []
+                if progress and n_wallets % 50000 == 0:
+                    progress(f"rotate {window_s}s: {n_wallets:,} wallets, {store.db.execute('SELECT COUNT(*) FROM sequences WHERE window_s=?', (window_s,)).fetchone()[0]:,} sequences so far")
+        buf.append(T(tid, tx, block, ts, token, side))
+    if buf and current is not None:
+        flush_wallet(current, buf)
+    if rows:
+        store.db.executemany(SEQ_INSERT, rows)
+    if reader is not store.db:
+        reader.close()
+    by_wallet = {"n": n_wallets}  # kept for the stats block below
     store.db.execute(
         """
         INSERT INTO edges(window_s,from_token,to_token,wallets_main,wallets_direct,wallets_clean,wallets_ambiguous,sequences,first_ts,last_ts)
@@ -156,7 +202,7 @@ def rotate(store: Store, window_s: int) -> dict[str, Any]:
     q = store.db.execute
     res = {
         "window_s": window_s,
-        "wallets_total": len(by_wallet),
+        "wallets_total": by_wallet["n"],
         "wallets_with_sell_and_buy": n_wallets_with_both,
         "sequences": q("SELECT COUNT(*) FROM sequences WHERE window_s=?", (window_s,)).fetchone()[0],
         "sequences_by_grade": dict(q("SELECT grade, COUNT(*) FROM sequences WHERE window_s=? GROUP BY grade", (window_s,)).fetchall()),
