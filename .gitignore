@@ -20,6 +20,8 @@ data/*.log
 data/serve.pid
 data/research-*.sqlite*
 data/wallet-scores-*.json
+# runner-model pickles written by `stampede edge`; the thresholds ship in stampede/signals/edge-config.json
+data/models/
 demo/v4/raw/*.webm
 demo/v4/out/*.mp4
 demo/v5/raw/*.webm

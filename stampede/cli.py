@@ -89,6 +89,16 @@ def main(argv: list[str] | None = None) -> int:
 
     _traders_parser(sub.add_parser("traders", help="FIFO ledgers with fees, wallet quality, walk-forward and copy-test -> wallet_stats / wallet_positions + docs/RESEARCH-TRADERS.md"))
 
+    p = sub.add_parser("edge-features", help="per-coin-minute feature table coin_minutes (stage 4) from trades, sequences and launch_intel; streaming, bounded memory")
+    p.add_argument("--db", required=True)
+    p.add_argument("--window", type=int, default=1800, help="sequence pairing window (seconds) to read rotation inflow from")
+    p.add_argument("--features-db", default=None, help="write coin_minutes into this sqlite instead of --db")
+    p.add_argument("--limit-coins", type=int, default=None)
+
+    from .research.edge import build_parser as _edge_parser
+
+    _edge_parser(sub.add_parser("edge", help="walk-forward runner model, alert precision/lift/lead, exit-policy search with exact curve fills -> docs/RESEARCH-EDGE.md + stampede/signals/edge-config.json + data/models/edge-<date>.pkl (needs the research extra: uv sync --extra research)"))
+
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8791)
@@ -152,6 +162,18 @@ def main(argv: list[str] | None = None) -> int:
         from .research.backfill import main_backfill
 
         return main_backfill(args)
+    if args.cmd == "edge-features":
+        from .research.features import build
+
+        import json as _json
+
+        print(_json.dumps(build(args.db, window_s=args.window, features_db=args.features_db, limit_coins=args.limit_coins), indent=1))
+        return 0
+    if args.cmd == "edge":
+        from .research.edge import run as run_edge
+
+        run_edge(args)
+        return 0
     if args.cmd == "launch-intel":
         from .context.launch_intel import main as main_launch_intel
 

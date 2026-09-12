@@ -18,6 +18,11 @@ dependencies = [
 [project.scripts]
 stampede = "stampede.cli:main"
 
+[project.optional-dependencies]
+research = [
+    "scikit-learn>=1.9.1",
+]
+
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
