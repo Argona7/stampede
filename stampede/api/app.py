@@ -17,6 +17,7 @@ import json
 import threading
 
 from ..context.holders import holders as fetch_holders
+from ..context.launch_intel import fetch_exempt
 from ..context.market import GeckoTerminal, budget
 from ..context.pons import launch_socials, sync_lifecycle
 from ..context.xmentions import XMentions
@@ -163,6 +164,9 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         progress_min: float | None = None,
         sort: str = "score",
         limit: int = 50,
+        bundle_max: int | None = None,
+        dev_buy_max: float | None = None,
+        exclude_farm: int = 0,
     ) -> dict[str, Any]:
         s = store()
         try:
@@ -173,6 +177,7 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
             if clock is None:
                 return {"clock": None, "rows": [], "total": 0, "presets": radar_mod.PRESETS, "waiting": True}
             params: dict[str, Any] = {"min_wallets": min_wallets, "age_max_s": age_max, "stage": stage, "exclude_bots": bool(exclude_bots), "quality_min": quality_min, "mentions_max": mentions_max, "progress_min": progress_min, "sort": sort}
+            params.update({"bundle_max": bundle_max, "dev_buy_max": dev_buy_max, "exclude_farm": bool(exclude_farm)})  # launch-quality filters (stage 3)
             if preset and preset in radar_mod.PRESETS:
                 for k, v in radar_mod.PRESETS[preset].items():
                     if k != "label":
@@ -201,6 +206,8 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
             ctx["market"] = load_context(s, "market", [addr]).get(addr)
             ctx["holders"] = load_context(s, "holders", [addr]).get(addr)
             ctx["socials"] = launch_socials(s, rpc, addr) if rpc else _cached_socials(s, addr)
+            if rpc:
+                fetch_exempt(s, rpc, addr)  # exact SnipeTaxExempted set from the launch tx receipt (stage 3); cached in `logs`
             if refresh:
                 gt = GeckoTerminal(s)
                 ctx["market"] = gt.token_market(addr, max_age_s=60)

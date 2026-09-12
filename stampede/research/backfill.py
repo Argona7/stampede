@@ -2,8 +2,8 @@
 
 Two passes over [from_block, to_block]:
 
-1. lifecycle: TokenLaunched / PoolRegistered / CurveCompleted / LaunchSwept / PoolGraduated (a few hundred thousand
-   rows). Stored in `logs` (so `sync_lifecycle` fills `launches` / `graduations` exactly as in the live store) and
+1. lifecycle: TokenLaunched / PoolRegistered / CurveCompleted / LaunchSwept / PoolGraduated / SnipeTaxExempted (a few
+   hundred thousand rows). Stored in `logs` (so `sync_lifecycle` fills `launches` / `graduations` exactly as in the live store) and
    parsed into `curves`, `tokens`, `pools` — the normalizer's universe.
 2. trades: CurveBuy / CurveSell / SnipeTaxCharged / CurveBuyRefunded (unique topics, every PONS curve), v4 `Swap` of
    the PONS pools (PoolManager address + poolId in topic1) and HookFeeCollected, with `join_mode=JoinAll` so the
@@ -136,7 +136,8 @@ class Backfill:
             to_block=to + 1,
             logs=[
                 hs.LogSelection(address=[chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK], topics=[[chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED, chain.T_LAUNCH_SWEPT, chain.T_POOL_GRADUATED]]),
-                hs.LogSelection(topics=[[chain.T_CURVE_COMPLETED]]),
+                # emitted by the curves themselves: CurveCompleted at graduation, SnipeTaxExempted in the launch tx
+                hs.LogSelection(topics=[[chain.T_CURVE_COMPLETED, chain.T_SNIPE_TAX_EXEMPTED]]),
             ],
             field_selection=self._fields(tx=False),
             join_mode=hs.JoinMode.JOIN_NOTHING,

@@ -34,7 +34,7 @@ const SORTS: [string, string, string][] = [
   ['progress', 'graduation', 'c-stage'],
   ['quality', 'wallet quality', 'c-score'],
 ]
-const PRESET_ORDER = ['under_radar', 'graduating', 'smart_rotators', 'all']
+const PRESET_ORDER = ['under_radar', 'graduating', 'smart_rotators', 'clean_launch', 'all']
 
 function Spark({ v }: { v: number[] }) {
   const w = 84
@@ -62,6 +62,19 @@ const ageText = (s: number | null) => {
   return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}`
 }
 const stageText = (r: RadarRow) => (r.stage === 'curve' ? (r.progress !== null ? `curve ${Math.round(r.progress * 100)}%` : 'curve') : r.stage === 'graduated' ? 'grad.' : null)
+// LAUNCH column group: null = unknown (n/a), never 0. Measured fields exist only for launches inside the indexed range.
+const NA = <span className="unk">n/a</span>
+const launchDev = (r: RadarRow) => (r.launch?.observed && r.launch.dev_buy_share !== null ? `${(r.launch.dev_buy_share * 100).toFixed(r.launch.dev_buy_share >= 0.1 ? 0 : 1)}%` : null)
+const launchBundle = (r: RadarRow) => (r.launch?.observed && r.launch.bundle_n !== null ? (r.launch.exempt_declared_n !== null ? `${r.launch.exempt_declared_n}` : `${r.launch.bundle_n}`) : null)
+const launchTax = (r: RadarRow) => (r.launch?.observed && r.launch.creator_tax_bps !== null ? `${r.launch.creator_tax_bps}` : null)
+const launchDep = (r: RadarRow) => (r.launch && r.launch.deployer_prior_launches_30d !== null ? (r.launch.deployer_prior_launches_30d === 0 ? 'first' : `${Math.round((r.launch.deployer_graduation_rate ?? 0) * 100)}% · ${r.launch.deployer_prior_launches_30d}`) : null)
+const launchTitle = (r: RadarRow) => {
+  const l = r.launch
+  if (!l) return 'launch intel not computed for this store (stampede launch-intel)'
+  if (!l.observed) return 'launched before the indexed range: deployer record only'
+  const bits = [`dev bought ${((l.dev_buy_share ?? 0) * 100).toFixed(2)}% of supply${l.dev_buy_quote !== null ? ` for ${l.dev_buy_quote} ${l.pair_symbol ?? ''}` : ''}`, `${l.bundle_n} untaxed buyers in the 3-s snipe window${l.exempt_declared_n !== null ? ` (declared exemptions: ${l.exempt_declared_n})` : ' (proxy for declared exemptions)'}`, `creator tax ${l.creator_tax_bps ?? 'n/a'} bps`, `deployer: ${l.deployer_prior_launches_30d} prior launches in 30 d, ${l.deployer_prior_graduations_30d ?? 0} graduated`, l.launch_farm ? `launch farm: ${l.farm_group_n} identical launches within 30 min` : 'not a launch farm', `${l.taxed_snipers_3s} taxed snipers`, `snipe tax zero at ${utc(l.snipe_tax_zero_ts)} UTC (+${l.snipe_window_s ?? 3} s, lower bound)`]
+  return bits.join('\n')
+}
 
 function scoreHint(r: RadarRow): string {
   const p = r.parts as Record<string, number | boolean>
@@ -183,6 +196,7 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
     bits.push(`≥ ${filters.minWallets} rotating wallets`)
     if (filters.mentionsMax !== null) bits.push(`≤ ${filters.mentionsMax} X mentions`)
     if (filters.excludeBots) bits.push('bots hidden')
+    if (filters.preset === 'clean_launch') bits.push('launch intel known: bundle ≤ 2, dev buy ≤ 5%, not a farm')
     return bits.join(', ')
   }
   const contextNote = ctx?.enabled ? 'X / market / holders context on' : mode === 'live' ? 'context warming up: X, holders and market fill in later' : 'replay · on-chain as-of numbers · X mentions and holders not fetched: n/a = unknown, not 0'
@@ -329,6 +343,21 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
                       <th className="num c-hold" title="holders; — = not fetched">
                         holders
                       </th>
+                      <th className="num c-launch c-ldev" title="LAUNCH · dev buy: share of supply bought in the launch tx or by the deployer within 5 s; n/a = launch not in the indexed range">
+                        dev %
+                      </th>
+                      <th className="num c-launch c-lbun" title="LAUNCH · bundle: wallets that bought inside the 3-s snipe window without paying the tax (declared exemptions when indexed, otherwise the behavioural proxy)">
+                        bndl
+                      </th>
+                      <th className="num c-launch c-ltax" title="LAUNCH · creator tax in basis points, read from the first taxed curve trade">
+                        tax
+                      </th>
+                      <th className="num c-launch c-ldep" title="LAUNCH · deployer record: graduation rate of the deployer's launches in the previous 30 days · number of those launches; 'first' = no prior launch">
+                        dep %
+                      </th>
+                      <th className="c-launch c-lfarm" title="LAUNCH · farm: ≥ 3 launches within 30 min sharing dev-buy amount and creator tax from wallets first seen < 24 h ago">
+                        farm
+                      </th>
                       <th className={`num c-score ${sort[2] === 'c-score' ? 'sorted' : ''}`}>score</th>
                     </tr>
                   </thead>
@@ -382,6 +411,21 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
                           </td>
                           <td className="num c-hold" title={r.holders ? `top-10 hold ${Math.round(r.holders.top10_share * 100)}%` : 'holders not fetched'}>
                             {r.holders ? r.holders.holders.toLocaleString('en-US') : UNK}
+                          </td>
+                          <td className="num c-launch c-ldev" title={launchTitle(r)}>
+                            {launchDev(r) ?? NA}
+                          </td>
+                          <td className={`num c-launch c-lbun ${(r.launch?.bundle_n ?? 0) >= 3 ? 'warn' : ''}`} title={launchTitle(r)}>
+                            {launchBundle(r) ?? NA}
+                          </td>
+                          <td className="num c-launch c-ltax" title={launchTitle(r)}>
+                            {launchTax(r) ?? NA}
+                          </td>
+                          <td className="num c-launch c-ldep" title={launchTitle(r)}>
+                            {launchDep(r) ?? NA}
+                          </td>
+                          <td className={`c-launch c-lfarm ${r.launch?.launch_farm ? 'warn' : ''}`} title={launchTitle(r)}>
+                            {r.launch?.launch_farm === true ? 'farm' : r.launch?.launch_farm === false ? <span className="unk">–</span> : NA}
                           </td>
                           <td className="num c-score" title={scoreHint(r)}>
                             {Math.round(r.score)}

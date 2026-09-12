@@ -19,6 +19,8 @@ export function presetToFilters(k: string): Partial<RadarFilters> {
       return { stage: 'curve', ageMax: null, mentionsMax: null, sort: 'progress', qualityMin: null }
     case 'smart_rotators':
       return { stage: null, ageMax: null, mentionsMax: null, excludeBots: true, sort: 'quality', qualityMin: 0.55 }
+    case 'clean_launch': // bundle ≤ 2, dev buy ≤ 5%, not a launch farm: applied server-side from the preset name
+      return { stage: null, ageMax: null, mentionsMax: null, sort: 'score', qualityMin: null }
     default:
       return { stage: null, ageMax: null, mentionsMax: null, sort: 'score', qualityMin: null }
   }

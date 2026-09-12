@@ -210,6 +210,32 @@ export interface EventsPage {
 
 
 // ---- radar ----
+// Launch quality per coin, precomputed by `stampede launch-intel` from indexed data (docs/RESEARCH-LAUNCHES.md).
+// null fields = unknown (the launch predates the indexed range, or the feature is not measurable), never 0.
+export interface LaunchIntel {
+  observed: boolean // launched inside the indexed trade range: dev buy / bundle / snipe fields are measured
+  dev_buy_share: number | null // tokens bought in the launch tx or by the deployer within 5 s, share of supply
+  dev_buy_quote: number | null // what the dev paid, in pair-token units (null when the pair's decimals are unknown)
+  pair_symbol: string | null
+  dev_buy_in_launch_tx: boolean | null
+  creator_tax_bps: number | null
+  bundle_n: number | null // untaxed buyers inside the 3-s snipe window (proxy for declared exemptions)
+  bundle_share: number | null
+  exempt_declared_n: number | null // exact SnipeTaxExempted count when indexed
+  first_buyers_5s: number | null
+  taxed_snipers_3s: number | null
+  snipe_tax_paid_quote: number | null
+  deployer_prior_launches_30d: number | null
+  deployer_prior_graduations_30d: number | null
+  deployer_graduation_rate: number | null
+  launch_farm: boolean | null
+  farm_group_n: number | null
+  socials_present: boolean | null
+  snipe_window_s: number | null
+  snipe_tax_zero_ts: number | null // launch ts + window; lower bound (block.timestamp has 1-s granularity)
+  source: string
+}
+
 export interface RadarSource {
   address: string
   symbol: string
@@ -244,6 +270,7 @@ export interface RadarRow extends TokenLabel {
   chg_1h: number | null
   vol_1h_quote: number
   buyers_1h: number
+  launch?: LaunchIntel | null
   market_now?: { price_usd: number | null; fdv_usd: number | null; reserve_usd: number | null; vol_h1: number | null; chg_h1: number | null; url: string; fetched_at: number }
   holders?: { holders: number; top10_share: number; dev_share: number | null; dev_sold_share: number; launch_block_buyers: number; as_of_block: number }
 }
@@ -265,7 +292,7 @@ export interface RadarResponse {
 
 export interface CoinDetail extends TokenLabel {
   symbol_raw?: string
-  launch: { deployer: string; pair_token: string; threshold: number | null; block: number; ts: number | null; tx_hash: string; source: string } | null
+  launch: { deployer: string; pair_token: string; threshold: number | null; block: number; ts: number | null; tx_hash: string; source: string; intel?: LaunchIntel | null } | null
   age_s: number | null
   progress: { progress: number | null; stage: string; graduated: boolean; curve_trades: number; curve_traders: number; threshold_raw: number | null; net_quote_raw: number; graduation: { ts: number | null; tx_hash: string | null } | null }
   as_of: { price_quote: number | null; quote_symbol: string | null; chg_5m: number | null; chg_1h: number | null; vol_1h_quote: number; trades_1h: number; buyers_1h: number; buys_1h?: number; as_of_ts: number }

@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from .. import chain
-from ..context import pons
+from ..context import launch_intel, pons
 from ..context.market import curve_stats
 from ..store import Store
 from . import queries
@@ -21,6 +21,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "under_radar": {"stage": "curve", "age_max_s": 4 * 3600, "mentions_max": 3, "exclude_bots": True, "sort": "score", "label": "Under radar: young, still on the curve, wallets rotating in, almost no X mentions"},
     "graduating": {"progress_min": 0.6, "stage": "curve", "sort": "progress", "label": "Graduating now: curve at 60%+ of its threshold with rotation inflow"},
     "smart_rotators": {"quality_min": 0.55, "exclude_bots": True, "sort": "quality", "label": "Smart rotators: inflow dominated by wallets whose past rotations preceded runners"},
+    "clean_launch": {"bundle_max": 2, "dev_buy_max": 0.05, "exclude_farm": True, "sort": "score", "label": "Clean launch: at most 2 tax-exempt bundle wallets, dev bought at most 5% of supply, not a launch farm (coins without launch intel do not pass)"},
     "all": {"label": "Everything with rotation inflow in the range"},
 }
 
@@ -31,7 +32,7 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 
 # Score v2 shape, calibrated on docs/RESEARCH-RUNNERS.md buckets (see SCORE_NOTES). Weights are explicit so
 # the backtest can be re-run and the numbers changed in one place.
-SCORE_NOTES = "inflow lift rises through 20-39 wallets in 10 min and drops at 40+; a fresh burst (accel >= 4), breadth and age < 1 h carry lift; wallets whose past rotations preceded runners roughly double the rate. Momentum is shown, not scored. Source: docs/RESEARCH-RUNNERS.md."
+SCORE_NOTES = "inflow lift rises through 20-39 wallets in 10 min and drops at 40+; a fresh burst (accel >= 4), breadth and age < 1 h carry lift; wallets whose past rotations preceded runners roughly double the rate. Momentum is shown, not scored. Source: docs/RESEARCH-RUNNERS.md. Launch quality (dev buy share, tax-exempt bundle, creator tax, deployer graduation rate, launch farm, snipe-tax zero time) is shown in the `launch` object and measured in docs/RESEARCH-LAUNCHES.md; it is not scored yet - the runner model (stage 4) will weigh it."
 
 
 def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str, chg_10m: float | None = None, smart_inflow: int | None = None) -> dict[str, Any]:
@@ -94,6 +95,9 @@ def radar(
     limit: int = 50,
     context: dict[str, Any] | None = None,
     rows: list[dict[str, Any]] | None = None,
+    bundle_max: int | None = None,
+    dev_buy_max: float | None = None,
+    exclude_farm: bool = False,
 ) -> dict[str, Any]:
     """One row per coin with rotation inflow in (clock - span, clock]; then filter + sort.
     Pass precomputed `rows` (from compute_rows) to avoid recomputing when only filters change."""
@@ -101,6 +105,8 @@ def radar(
     out = []
     for row in base:
         if row["wallets_range"] < min_wallets:
+            continue
+        if not launch_intel.is_clean(row.get("launch"), bundle_max, dev_buy_max, exclude_farm):
             continue
         if age_max_s is not None and (row["age_s"] is None or row["age_s"] > age_max_s):
             continue
@@ -192,6 +198,8 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
             net_quote[r[0]] = float(r[1] or 0)
         for r in q(f"SELECT token, ts, side, CAST(token_amount AS REAL), CAST(quote_amount AS REAL), quote_token, wallet FROM trades WHERE token IN ({ph}) AND ts>? AND ts<=? AND CAST(quote_amount AS REAL)>0 AND CAST(token_amount AS REAL)>0 ORDER BY ts", chunk + [clock - 3600, clock]):
             hour_trades[r[0]].append(r[1:])
+    # launch quality per coin (stage 3): precomputed by `stampede launch-intel`; None when the store has no row for the coin
+    intel = launch_intel.intel_for(store, toks)
     out = []
     for tok, d in per.items():
         inflow10 = len(d["w10"])
@@ -245,6 +253,7 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
         row["chg_1h"] = cs["chg_1h"]
         row["vol_1h_quote"] = cs["vol_1h_quote"]
         row["buyers_1h"] = cs["buyers_1h"]
+        row["launch"] = intel.get(tok)
         mk = (ctx.get("market") or {}).get(tok)
         if mk and mk.get("found"):
             row["market_now"] = {k: mk.get(k) for k in ("price_usd", "fdv_usd", "reserve_usd", "vol_h1", "chg_h1", "url", "fetched_at")}
@@ -298,6 +307,8 @@ def coin(store: Store, token: str, window_s: int, clock: int, span_s: int, rpc=N
     ctx = context or {}
     bt = store.db.execute("SELECT ts FROM trades WHERE token=? ORDER BY block LIMIT 1", (token,)).fetchone()
     age_s = (clock - la["ts"]) if la and la.get("ts") else ((clock - bt[0]) if bt and bt[0] else None)
+    if la is not None:
+        la = {**la, "intel": launch_intel.intel_for(store, {token}).get(token)}  # stage 3 launch quality; None until `stampede launch-intel` ran
     return {
         **labels[token],
         "launch": la,

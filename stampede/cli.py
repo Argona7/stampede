@@ -69,6 +69,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-resume", action="store_true", help="ignore the stored cursor and start over")
     p.add_argument("--rotate", action="store_true", help="compute 5 min and 30 min sequences when the trades pass is done")
 
+    p = sub.add_parser("launch-intel", help="per-launch quality features (dev buy, bundle, creator tax, deployer record, launch farm, snipe-tax zero time) into launch_intel + runner-rate report")
+    p.add_argument("--db", required=True, help="store to read and to write launch_intel into")
+    p.add_argument("--out", default="", help="markdown report path (default: stdout)")
+    p.add_argument("--horizon", type=int, default=3600, help="observation window after the launch, seconds")
+    p.add_argument("--gain", type=float, default=1.0, help="runner = price multiple minus one within the horizon: 1.0 = 2x")
+    p.add_argument("--socials", type=int, default=0, help="parse declared socials from up to N launch transactions (needs ALCHEMY_KEY)")
+    p.add_argument("--resolve-quotes", action="store_true", help="fill `quotes` for pair tokens missing symbol/decimals (two eth_calls per pair token, needs ALCHEMY_KEY)")
+    p.add_argument("--limit", type=int, default=None, help="debug: only the first N observed launches")
+    p.add_argument("--no-report", action="store_true")
+
     p = sub.add_parser("fx", help="USD rates of the quote assets (ETH hourly from CoinGecko, other pair tokens spot from GeckoTerminal) into fx_rates")
     p.add_argument("--db", default=None)
     p.add_argument("--days", type=float, default=14.0)
@@ -140,6 +150,10 @@ def main(argv: list[str] | None = None) -> int:
         from .research.backfill import main_backfill
 
         return main_backfill(args)
+    if args.cmd == "launch-intel":
+        from .context.launch_intel import main as main_launch_intel
+
+        return main_launch_intel([f"--db={args.db}", f"--out={args.out}", f"--horizon={args.horizon}", f"--gain={args.gain}", f"--socials={args.socials}"] + ([f"--limit={args.limit}"] if args.limit else []) + (["--no-report"] if args.no_report else []) + (["--resolve-quotes"] if args.resolve_quotes else []))
     if args.cmd == "terminal":
         from .tui.app import main_terminal
 

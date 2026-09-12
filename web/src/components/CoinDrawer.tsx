@@ -15,9 +15,11 @@ interface Props {
 const pct = (v: number | null | undefined, d = 1) => (v === null || v === undefined ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(d)}%`)
 const usd = (v: number | null | undefined) => (v === null || v === undefined ? '—' : v >= 1e6 ? `$${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `$${(v / 1e3).toFixed(1)}k` : `$${v.toFixed(2)}`)
 const ago = (ts: number | null | undefined) => (ts ? `${Math.max(0, Math.round((Date.now() / 1000 - ts) / 60))} min ago` : '')
+const NA = <span className="unk">n/a</span>
 
 export default function CoinDrawer({ coin, loading, error, session, onClose, onRefresh, onFlow, onFocus }: Props) {
   const replay = session?.mode !== 'live'
+  const intel = coin?.launch?.intel ?? null // launch quality (stage 3): null until `stampede launch-intel` ran on this store
   const notFetched = replay ? 'not fetched · external context is off in replay · Refresh context fetches it now (paid calls)' : 'not fetched yet · Refresh context'
   return (
     <aside className="coin-drawer" aria-label="Coin details">
@@ -92,6 +94,33 @@ export default function CoinDrawer({ coin, loading, error, session, onClose, onR
               {coin.buyers} · {coin.new_buyers}
             </span>
           </div>
+
+          <h2>Launch {intel ? '· from indexed trades and lifecycle logs' : ''}</h2>
+          {intel ? (
+            <div className="kv launch-kv" data-testid="launch-section">
+              <span title="tokens bought in the launch transaction or by the deployer within 5 s, share of the 1e9 supply">dev buy</span>
+              <span>{intel.dev_buy_share !== null ? `${(intel.dev_buy_share * 100).toFixed(2)}%${intel.dev_buy_quote !== null ? ` · ${intel.dev_buy_quote.toLocaleString('en-US', { maximumSignificantDigits: 4 })} ${intel.pair_symbol ?? ''}` : ''}${intel.dev_buy_in_launch_tx ? ' · launch tx' : ''}` : NA}</span>
+              <span title="wallets other than the deployer that bought inside the 3-s snipe window and paid no snipe tax: the declared exemption list when SnipeTaxExempted logs are indexed, otherwise a behavioural proxy">bundle · 3 s</span>
+              <span className={(intel.bundle_n ?? 0) >= 3 ? 'warn' : ''}>{intel.bundle_n !== null ? `${intel.bundle_n} wallets · ${((intel.bundle_share ?? 0) * 100).toFixed(2)}%${intel.exempt_declared_n !== null ? ` · declared ${intel.exempt_declared_n}` : ' · proxy'}` : NA}</span>
+              <span>creator tax</span>
+              <span>{intel.creator_tax_bps !== null ? `${intel.creator_tax_bps} bps` : NA}</span>
+              <span title="wallets that bought inside the window and paid the snipe tax, and what they paid">taxed snipers</span>
+              <span>{intel.taxed_snipers_3s !== null ? `${intel.taxed_snipers_3s}${intel.snipe_tax_paid_quote !== null ? ` · paid ${intel.snipe_tax_paid_quote.toLocaleString('en-US', { maximumSignificantDigits: 4 })} ${intel.pair_symbol ?? ''}` : ''}` : NA}</span>
+              <span>first buyers · 5 s</span>
+              <span>{intel.first_buyers_5s ?? NA}</span>
+              <span title="launches by the same deployer in the previous 30 days, how many had graduated before this launch">deployer · 30 d</span>
+              <span>{intel.deployer_prior_launches_30d !== null ? (intel.deployer_prior_launches_30d === 0 ? 'first launch' : `${intel.deployer_prior_launches_30d} launches · ${intel.deployer_prior_graduations_30d ?? 0} grad · ${Math.round((intel.deployer_graduation_rate ?? 0) * 100)}%`) : NA}</span>
+              <span title="≥ 3 launches within 30 min sharing pair token, creator tax and exact dev-buy amount, all from deployers first seen < 24 h ago">launch farm</span>
+              <span className={intel.launch_farm ? 'warn' : ''}>{intel.launch_farm === null ? NA : intel.launch_farm ? `yes · ${intel.farm_group_n} alike in 30 min` : 'no'}</span>
+              <span>socials declared</span>
+              <span>{intel.socials_present === null ? NA : intel.socials_present ? 'yes' : 'no'}</span>
+              <span title="launch block time + the curve's snipe window; block.timestamp has 1-s granularity, so this is a lower bound">snipe tax zero at</span>
+              <span>{intel.snipe_tax_zero_ts ? `${utc(intel.snipe_tax_zero_ts)} UTC (+${intel.snipe_window_s ?? 3} s)` : NA}</span>
+              {!intel.observed && <div className="faint tiny">launched before the indexed range: deployer record only, the rest is n/a</div>}
+            </div>
+          ) : (
+            <div className="faint" data-testid="launch-section">n/a · launch intel not computed for this store (run stampede launch-intel)</div>
+          )}
 
           <h2>Rotation · distinct wallets · pairing window {windowName(session?.window_s ?? 1800)}</h2>
           <div className="flows">

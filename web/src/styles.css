@@ -1282,6 +1282,57 @@ hr {
   color: var(--secondary);
 }
 
+/* LAUNCH column group (stage 3): compact, right-aligned; a flagged bundle or farm is marked, unknown stays n/a */
+.radar-table .c-launch {
+  padding: 0 4px;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.radar-table th.c-ldev {
+  border-left: 1px solid var(--border);
+}
+
+.radar-table td.c-ldev {
+  border-left: 1px solid var(--border);
+}
+
+.radar-table .c-lfarm {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.radar-table .c-launch.warn,
+.kv span.warn {
+  color: var(--primary);
+}
+
+/* the group leaves after the sparkline, before the core columns: at the default 1440 width (1140 px list next to
+   the alerts) dev % / bundle / farm stay; creator tax, the deployer rate and the holders column go first (all three
+   are in the drawer and in the cell tooltip) */
+@container (max-width: 1250px) {
+  .radar-table .c-ldep,
+  .radar-table .c-ltax,
+  .radar-table .c-hold {
+    display: none;
+  }
+
+  .radar-row .c-from {
+    max-width: 160px; /* already ellipsized; 40 px pay for the three launch flags */
+  }
+}
+
+@container (max-width: 860px) {
+  .radar-table .c-launch {
+    display: none;
+  }
+}
+
+.launch-kv .tiny {
+  grid-column: 1 / -1;
+}
+
 .spark {
   display: block;
 }

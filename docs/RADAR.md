@@ -25,6 +25,7 @@ happened). The score is recomputed on every request from indexed data, as of the
 - **Under radar**: on the curve, younger than 4 h, X mentions ≤ 3 in the last hour (or unknown), bots hidden.
 - **Graduating**: curve at ≥ 60% of its graduation threshold, sorted by progress.
 - **Smart rotators**: inflow wallets with mean quality ≥ 0.55, bots hidden.
+- **Clean launch**: launch intel known and clean — at most 2 tax-exempt bundle wallets, dev bought ≤ 5% of supply, not a launch farm (coins without launch intel do not pass; n/a is not 0).
 - **All**: every coin with inflow in the visible range.
 
 Filters: minimum wallets in range, coin age, stage (curve / graduated), X 1h ≤ N, sort, hide bots.
@@ -40,6 +41,7 @@ Filters: minimum wallets in range, coin age, stage (curve / graduated), X 1h ≤
 | Holders / dev | full ERC-20 Transfer history of the coin via public RPC: holders, top-10 share, dev holding and sold share, launch-block buyers | live top-10, or drawer refresh | 5–10 min |
 | X mentions | twitterapi.io advanced search: `"$SYM" OR <contract> OR (SYM (robinhood OR pons OR memecoin))`, last 24 h, up to 60 tweets counted | live top-30, or drawer refresh | 5 min |
 | Wallet scores | `stampede.research.backtest --write-scores` on a research store, imported with `stampede wallet-scores --from` | import step | until re-imported |
+| Launch quality | `stampede launch-intel --db <store>` from indexed trades and lifecycle logs: dev buy share, tax-exempt bundle (proxy, exact when `SnipeTaxExempted` logs are indexed), creator tax, deployer record over 30 days, launch-farm flag, snipe-tax zero time (`docs/RESEARCH-LAUNCHES.md`). Shown as the `LAUNCH` column group (dev % · bndl · farm at 1440 px; tax and deployer rate when wider) and the drawer's *Launch* section; not scored yet | batch step; the drawer refresh reads the exact exemption list from the launch receipt | until recomputed |
 
 Replay mode keeps to as-of-clock on-chain numbers; external "now" data is fetched only in live mode
 (`serve --context live`, default) or with `--context always`. Every external number carries its fetch time.

@@ -170,6 +170,68 @@ test('radar view ranks coins in a table, opens the coin drawer, presets and keys
   await expect(page.getByTestId('view-radar')).toHaveAttribute('aria-selected', 'true')
 })
 
+test('radar shows the LAUNCH column group and the drawer a Launch section; unknown is n/a, never 0; no horizontal overflow', async ({ page }) => {
+  await page.goto('/?view=radar')
+  await page.waitForSelector('.radar-row', { timeout: 20000 })
+  const rows = page.locator('.radar-row')
+  // five compact columns, right-aligned numbers, all present at the default viewport without scrolling the table
+  for (const [cls, label] of [
+    ['c-ldev', 'dev %'],
+    ['c-lbun', 'bndl'],
+    ['c-ltax', 'tax'],
+    ['c-ldep', 'dep %'],
+    ['c-lfarm', 'farm'],
+  ]) {
+    await expect(page.locator(`.radar-table th.${cls}`)).toHaveText(label)
+  }
+  for (const cls of ['c-ldev', 'c-lbun', 'c-lfarm']) await expect(page.locator(`.radar-table th.${cls}`)).toBeVisible() // tax and the deployer rate yield first (drawer and tooltip have them)
+  await expect(page.locator('.radar-table th.c-score')).toBeVisible()
+  expect(await rows.nth(0).locator('.c-ldev').evaluate((el) => getComputedStyle(el).textAlign)).toBe('right')
+  const list = await page.locator('.radar-list').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+  expect(list.scroll).toBeLessThanOrEqual(list.client)
+  // every cell is either a measured value or n/a (the API returns null for unknown; the UI never prints 0 for it)
+  const n = Math.min(await rows.count(), 8)
+  const cell = /^(n\/a|\d+(\.\d+)?%|\d+|first|\d+% · \d+|farm|–)$/
+  for (let i = 0; i < n; i++) {
+    for (const cls of ['c-ldev', 'c-lbun', 'c-ltax', 'c-ldep', 'c-lfarm']) {
+      expect((await rows.nth(i).locator(`.${cls}`).textContent())?.trim()).toMatch(cell)
+    }
+  }
+  // the API and the table agree row by row: null -> n/a, a share -> percent
+  const api = await (await page.request.get('/api/radar?limit=8&preset=under_radar')).json()
+  const byAddr = new Map((api.rows as { address: string; launch: null | { observed: boolean; dev_buy_share: number | null; launch_farm: boolean | null } }[]).map((r) => [r.address, r.launch]))
+  for (let i = 0; i < n; i++) {
+    const addr = await rows.nth(i).getAttribute('data-address')
+    const l = byAddr.get(addr!)
+    if (l === undefined) continue // the table re-ranked between the two requests
+    const dev = (await rows.nth(i).locator('.c-ldev').textContent())?.trim()
+    if (!l || !l.observed || l.dev_buy_share === null) expect(dev).toBe('n/a')
+    else expect(dev).toMatch(/%$/)
+    const farm = (await rows.nth(i).locator('.c-lfarm').textContent())?.trim()
+    expect(farm).toBe(l?.launch_farm === true ? 'farm' : l?.launch_farm === false ? '–' : 'n/a')
+  }
+  // the drawer has a Launch section: measured fields with the snipe-tax zero time, or an explicit n/a
+  await rows.nth(0).click()
+  await expect(page.locator('.coin-drawer h1')).not.toHaveText('Loading…', { timeout: 15000 })
+  await expect(page.locator('.coin-drawer h2', { hasText: /^Launch/ })).toBeVisible()
+  const section = page.getByTestId('launch-section')
+  await expect(section).toBeVisible()
+  const first = byAddr.get((await rows.nth(0).getAttribute('data-address'))!)
+  if (first && first.observed) {
+    await expect(section).toContainText('dev buy')
+    await expect(section).toContainText(/snipe tax zero at/)
+    await expect(section).toContainText(/\d\d:\d\d:\d\d UTC \(\+3 s\)/)
+  } else {
+    await expect(section).toContainText('n/a')
+  }
+  // the clean_launch preset exists and either lists coins with known launch intel or explains the empty state
+  await page.getByRole('button', { name: 'clean launch' }).click()
+  await expect(page.locator('.presets button.on')).toHaveText(/clean launch/)
+  await page.waitForFunction(() => document.querySelector('.radar-row') !== null || document.querySelector('[data-testid="radar-empty"]') !== null, null, { timeout: 20000 })
+  if ((await page.locator('.radar-row').count()) === 0) await expect(page.getByTestId('radar-empty')).toContainText('bundle ≤ 2, dev buy ≤ 5%, not a farm')
+  else for (let i = 0; i < Math.min(await page.locator('.radar-row').count(), 5); i++) expect((await page.locator('.radar-row').nth(i).locator('.c-lfarm').textContent())?.trim()).toBe('–')
+})
+
 test('radar selection is keyed by address, survives polling, moves with the arrows; Enter opens FLOW, Esc returns', async ({ page }) => {
   await page.goto('/?view=radar')
   await page.waitForSelector('.radar-row', { timeout: 20000 })
@@ -236,7 +298,7 @@ test('view tabs are keyboard operable with distinct active and focus states', as
   const idle = await page.getByTestId('view-map').evaluate((el) => getComputedStyle(el).boxShadow)
   expect(idle).not.toContain('rgb(255, 51, 68)')
   await page.keyboard.press('End')
-  await expect(page.getByTestId('view-map')).toHaveAttribute('aria-selected', 'true')
+  await expect(page.getByTestId('view-traders')).toHaveAttribute('aria-selected', 'true') // the last tab is TRADERS (stage 2)
 })
 
 test('flow view draws readable ribbons for the top radar coin and links to evidence', async ({ page }) => {

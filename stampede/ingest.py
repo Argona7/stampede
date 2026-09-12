@@ -165,7 +165,8 @@ class Ingest:
                 except Exception as e:  # noqa: BLE001
                     self.stats["chunk_failures"] += 1
                     self.stats["blocks_missing"].append([f[0], f[1], redact(str(e))[:120]])
-            lifecycle = [l for l in logs if (l["topics"][0] in (chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED, chain.T_LAUNCH_SWEPT, chain.T_POOL_GRADUATED) and l["address"].lower() in (chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK)) or l["topics"][0] == chain.T_CURVE_COMPLETED]
+            # CurveCompleted and SnipeTaxExempted are emitted by the curves themselves (address unknown in advance)
+            lifecycle = [l for l in logs if (l["topics"][0] in (chain.T_TOKEN_LAUNCHED, chain.T_POOL_REGISTERED, chain.T_LAUNCH_SWEPT, chain.T_POOL_GRADUATED) and l["address"].lower() in (chain.PONS_V2_FACTORY, chain.PONS_V2_HOOK)) or l["topics"][0] in (chain.T_CURVE_COMPLETED, chain.T_SNIPE_TAX_EXEMPTED)]
             swaps = self._keep_swaps([l for l in logs if l["topics"][0] in chain.SWAP_TOPICS])
             transfers = [l for l in logs if l["topics"][0] == chain.T_TRANSFER]
             side = [l for l in logs if l["topics"][0] in chain.CURVE_SIDE_TOPICS]
@@ -197,11 +198,16 @@ class Ingest:
         logs, txs, blocks = self.hs.logs(fr, to, chain.SWAP_TOPICS)
         swaps = self._keep_swaps(logs, is_hs=True)
         tx_set = {l["transaction_hash"] for l in swaps}
-        tlogs, _, tblocks = self.hs.logs(fr, to, [chain.T_TRANSFER] + chain.CURVE_SIDE_TOPICS, join_tx=False)
+        tlogs, _, tblocks = self.hs.logs(fr, to, [chain.T_TRANSFER] + chain.CURVE_SIDE_TOPICS + [chain.T_SNIPE_TAX_EXEMPTED], join_tx=False)
+        # declared snipe-tax exemptions live in the launch tx, which has no swap unless launchAndBuy: keep them all
+        exempt = [l for l in tlogs if l.get("topic0") == chain.T_SNIPE_TAX_EXEMPTED]
+        tlogs = [l for l in tlogs if l.get("topic0") != chain.T_SNIPE_TAX_EXEMPTED]
         self.stats["logs_transfer_seen"] += len(tlogs)
         keep_tr = [l for l in tlogs if l["transaction_hash"] in tx_set]
         self.store.insert_logs(hs_log_row(l) for l in swaps)
         self.store.insert_logs(hs_log_row(l) for l in keep_tr)
+        self.store.insert_logs(hs_log_row(l) for l in exempt)
+        self.stats["logs_lifecycle_kept"] += len(exempt)
         self.store.insert_txs((t["hash"], int(t["block_number"]), (t.get("from") or "").lower(), (t.get("to") or "").lower(), "hypersync") for t in txs if t.get("hash") in tx_set)
         self.store.upsert_blocks((int(b["number"]), int(b["timestamp"], 16) if isinstance(b["timestamp"], str) else int(b["timestamp"]), 1) for b in blocks + tblocks)
         self.store.commit()

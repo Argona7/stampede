@@ -64,6 +64,7 @@ SIG_BUYBACK_LOCKED = "BuybackLocked(uint256,uint256)"  # quoteSpent stays in the
 SIG_LAUNCH_SWEPT = "LaunchSwept(address,uint256,uint256)"  # factory: token indexed, quoteOut, tokenOut (graduation phase 1)
 SIG_POOL_GRADUATED = "PoolGraduated(address,uint256,uint256,uint256)"  # factory: token indexed, positionId, tokenAmount, pairTokenAmount (phase 2)
 SIG_HOOK_FEE = "HookFeeCollected(bytes32,address,uint256,uint256)"  # hook: poolId indexed, currency, feeAmount, taxAmount (post-graduation swaps)
+SIG_SNIPE_TAX_EXEMPTED = "SnipeTaxExempted(address)"  # curve, in the launch tx: account indexed (deployer, creator fee recipient, up to 32 declared wallets; duplicates occur)
 
 
 def topic(sig: str) -> str:
@@ -88,6 +89,7 @@ T_BUYBACK_LOCKED = topic(SIG_BUYBACK_LOCKED)
 T_LAUNCH_SWEPT = topic(SIG_LAUNCH_SWEPT)
 T_POOL_GRADUATED = topic(SIG_POOL_GRADUATED)
 T_HOOK_FEE = topic(SIG_HOOK_FEE)
+T_SNIPE_TAX_EXEMPTED = topic(SIG_SNIPE_TAX_EXEMPTED)
 
 # Values measured on-chain (2026-09-10 / 2026-09-11); tests assert topic() reproduces them.
 EXPECTED_TOPICS = {
@@ -103,13 +105,14 @@ EXPECTED_TOPICS = {
     "LaunchSwept": "0xcdb72f157fd3666758a6ce201387ffb52038c7562e4fff352828da1096c4b6b4",
     "PoolGraduated": "0x0a44ef75df69c534f43cd6c1aa3ef8983065fe5fe79ef9e79f6494e6f258c259",
     "HookFeeCollected": "0xc532c43b3423e14ef72748f1c8291238829ca0af8ba9b67975ad1483485a4b4d",
+    "SnipeTaxExempted": "0xe4b7e48fbd47c2f602bacadee76ad33b16542ddb4997cfc0de04c311adcfa8c7",  # launch tx receipt 0xb73daf4a…cc0b2, 2026-09-12
 }
 
 SWAP_TOPICS = [T_CURVE_BUY, T_CURVE_SELL, T_V4_SWAP]
 # PoolRegistered on the PONS V2MemeHook fires when a graduated pool is created; payload = [memecoin, quoteToken, creator].
 # topic0 as documented by Bitquery's Pons API guide (2026-09); the event signature itself is not published.
 T_POOL_REGISTERED = "0x01bf263a1db1652580721573296e1a1fa70b3d4c87f61d02a69c4e1109d2d573"
-LIFECYCLE_TOPICS = [T_TOKEN_LAUNCHED, T_CURVE_COMPLETED, T_POOL_REGISTERED, T_LAUNCH_SWEPT, T_POOL_GRADUATED]
+LIFECYCLE_TOPICS = [T_TOKEN_LAUNCHED, T_CURVE_COMPLETED, T_POOL_REGISTERED, T_LAUNCH_SWEPT, T_POOL_GRADUATED, T_SNIPE_TAX_EXEMPTED]
 # curve-side events that carry money but are not trades: fee breakdown and reserve changes
 CURVE_SIDE_TOPICS = [T_SNIPE_TAX, T_CURVE_REFUND, T_FEES_SWEPT, T_BUYBACK_LOCKED, T_HOOK_FEE]
 PONS_V2_LOCKER = "0x267444d099b10fb5ed7c3cc7b7c767adca574952"  # holds the permanently locked supply of graduated tokens
@@ -130,6 +133,7 @@ KIND_BY_TOPIC = {
     T_LAUNCH_SWEPT: "launch_swept",
     T_POOL_GRADUATED: "pool_graduated",
     T_HOOK_FEE: "hook_fee",
+    T_SNIPE_TAX_EXEMPTED: "snipe_tax_exempted",
 }
 
 # --- PONS v2 curve economics (live launch config 0 read from the factory on 2026-09-11; every curve snapshots its own

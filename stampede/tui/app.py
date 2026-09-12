@@ -57,6 +57,22 @@ def short(a: str) -> str:
     return f"{a[:6]}…{a[-4:]}" if a and len(a) > 12 else a
 
 
+def launch_line(li: dict | None) -> str:
+    """One line of launch quality (stage 3) for the coin card; n/a = unknown, never 0."""
+    if not li:
+        return "launch: n/a (run stampede launch-intel on this store)"
+    if not li.get("observed"):
+        dep = li.get("deployer_prior_launches_30d")
+        return f"launch: before the indexed range · deployer {dep if dep is not None else 'n/a'} prior launches in 30d"
+    dev = f"{li['dev_buy_share'] * 100:.2f}%" if li.get("dev_buy_share") is not None else "n/a"
+    bundle = li.get("exempt_declared_n") if li.get("exempt_declared_n") is not None else li.get("bundle_n")
+    tax = f"{li['creator_tax_bps']} bps" if li.get("creator_tax_bps") is not None else "n/a"
+    prior = li.get("deployer_prior_launches_30d")
+    grad = "first" if prior == 0 else (f"{(li.get('deployer_graduation_rate') or 0) * 100:.0f}% of {prior}" if prior is not None else "n/a")
+    farm = {True: "yes", False: "no"}.get(li.get("launch_farm"), "n/a")
+    return f"launch: dev {dev} · bundle {bundle if bundle is not None else 'n/a'} · tax {tax} · dep grad {grad} · farm {farm} · tax-free from {utc(li.get('snipe_tax_zero_ts'))} UTC (+{li.get('snipe_window_s') or 3}s)"
+
+
 def dur(s: int | None) -> str:
     """Compact duration: 44s · 15m20s · 30m · 1h05m · 2h."""
     if s is None:
@@ -738,6 +754,7 @@ class StampedeTUI(App):
         t.append(f"age {dur(c['age_s']) if c.get('age_s') is not None else '?'} · {stage}\n", style=TEXT)
         if la:
             t.append(f"launched {utc(la.get('ts'))} UTC · deployer {short(la.get('deployer', ''))}\n", style=SECONDARY)
+        t.append(launch_line(la.get("intel") if la else None) + "\n", style=SECONDARY)
         c5 = aso.get("chg_5m")
         c1 = aso.get("chg_1h")
         t.append(f"price 5m {c5:+.1f}% · 1h {c1:+.1f}%\n" if c5 is not None and c1 is not None else "price change: n/a\n", style=TEXT)
