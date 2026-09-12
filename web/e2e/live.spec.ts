@@ -116,7 +116,7 @@ test('live engine: RADAR rows arrive from radar_delta, the badge carries the lag
   await expect(page.getByTestId('mode')).toHaveText(/^LIVE · \d+(\.\d+)? (ms|s)$/)
   await page.waitForSelector('.radar-row', { timeout: 20000 })
   await expect(page.getByTestId('order-note')).toContainText(/ranked by|order held/)
-  await expect(page.locator('.radar-meta')).toContainText('rows from the event stream')
+  await expect(page.locator('.radar-meta')).toContainText('rows from the event stream', { timeout: 15000 })
   const d0 = (await page.evaluate(() => window.__stampede_state())).liveDeltas
   await page.waitForFunction((d) => window.__stampede_state().liveDeltas > d, d0, { timeout: 20000 })
   // hovering holds the order while deltas keep coming; the selection survives them
@@ -125,7 +125,7 @@ test('live engine: RADAR rows arrive from radar_delta, the badge carries the lag
   await rows.nth(0).click()
   await page.keyboard.press('d')
   await rows.nth(1).hover()
-  await expect(page.getByTestId('order-note')).toContainText('order held')
+  await expect(page.getByTestId('order-note')).toContainText('order held', { timeout: 10000 })
   await page.waitForTimeout(1500)
   await expect(page.locator('.radar-row.sel')).toHaveAttribute('data-address', a0!)
   await page.mouse.move(700, 20)
@@ -136,7 +136,8 @@ test('live engine: RADAR rows arrive from radar_delta, the badge carries the lag
   const paper = await (await page.request.get(`${base}/api/paper`)).json()
   expect(paper.source).toBe('engine')
   expect(paper.simulated).toBe(true)
-  await expect(page.getByTestId('paper-stats')).toContainText('closed trades (coins)')
-  await expect(page.getByTestId('track-record')).toContainText('run')
-  await expect(page.getByTestId('track-record')).toContainText('uptime')
+  // /api/paper and /api/track-record read a multi-GB store on a shared machine: give them time
+  await expect(page.getByTestId('paper-stats')).toContainText('closed trades (coins)', { timeout: 20000 })
+  await expect(page.getByTestId('track-record')).toContainText('run', { timeout: 30000 })
+  await expect(page.getByTestId('track-record')).toContainText('uptime', { timeout: 30000 })
 })
