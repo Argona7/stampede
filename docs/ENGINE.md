@@ -53,6 +53,13 @@ Block assembly (`BlockAssembler`, pure, tested with synthetic frames) releases b
    block and re-emitted as a `late` fragment once the transfer stream passes the block (or fetched over HTTP after 5 s).
    A trade is never attributed from a partial transfer set.
 
+Logs that arrive for an already released block (under load the node delivers a PONS log after the next head now and
+then; during a transfer burst thousands of transfers trail) become `late` fragments after a 100 ms settle. The state
+keeps every log of the last 300 blocks, so a fragment is normalized together with the on-time logs of its transaction;
+late transfers of a transaction without a known swap are parked by the assembler and rejoined if its swap log comes
+later. Measured on a receipt recall check (docs/ENGINE-PERF.md): 100 % in a calm window, 3 of 1,370 trades lost in the
+worst burst window before this path existed.
+
 Gaps: a head sequence with holes, a block whose header never arrives, and the blocks around a (re)connect of either
 connection are requested from Alchemy (`Rpc.get_logs_parallel`, the same topics, 10-block sub-ranges, 50-block chunks
 oldest first) plus headers; later blocks wait in the queue until the gap is filled (60 s timeout -> the block is
