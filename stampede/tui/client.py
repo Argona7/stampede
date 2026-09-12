@@ -1,13 +1,109 @@
-"""Small HTTP client for the STAMPEDE API. Injected into the TUI so tests can replace it."""
+"""Small HTTP client for the STAMPEDE API. Injected into the TUI so tests can replace it.
+
+`open_stream()` adds the live side: one daemon thread reading `GET /api/stream` (Server-Sent Events, docs/ENGINE.md)
+with `Last-Event-ID` on every reconnect, so a live TUI gets alerts, paper positions, radar deltas and the engine's lag as
+they are published instead of waiting for the next poll. A server without an engine (fixture, replay, `--feed alchemy`)
+answers the hello with another engine name: the reader reports `unavailable` and stops, and the TUI keeps polling.
+"""
 from __future__ import annotations
 
-from typing import Any
+import json
+import threading
+import time
+from typing import Any, Callable
 
 import requests
 
 
 class ApiError(Exception):
     pass
+
+
+class StreamReader(threading.Thread):
+    """SSE reader thread. `on_event(frame)` gets the parsed JSON frame (`id, type, ts_emit, block, data`); `on_status(state,
+    detail)` gets `connecting` / `live` / `reconnecting` / `unavailable` / `off`. Both are called from this thread."""
+
+    def __init__(self, base_url: str, on_event: Callable[[dict[str, Any]], None], on_status: Callable[[str, str | None], None], types: list[str] | None = None, session: requests.Session | None = None, backoff_max_s: float = 15.0):
+        super().__init__(daemon=True, name="tui-stream")
+        self.base = base_url.rstrip("/")
+        self.on_event = on_event
+        self.on_status = on_status
+        self.types = types
+        self._s = session or requests.Session()
+        self._stop = threading.Event()
+        self.last_id: int | None = None
+        self.last_lag_s: float | None = None
+        self.frames = 0
+        self.reconnects = 0
+        self.backoff_max_s = backoff_max_s
+        self._resp: requests.Response | None = None
+
+    def stop(self) -> None:
+        self._stop.set()
+        try:
+            if self._resp is not None:
+                self._resp.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _url(self) -> str:
+        q = []
+        if self.types:
+            q.append("types=" + ",".join(self.types))
+        if self.last_id is not None:
+            q.append(f"last_event_id={self.last_id}")
+        return self.base + "/api/stream" + ("?" + "&".join(q) if q else "")
+
+    def run(self) -> None:
+        fails = 0
+        while not self._stop.is_set():
+            self.on_status("connecting" if not self.reconnects else "reconnecting", None)
+            try:
+                with self._s.get(self._url(), stream=True, timeout=(6, 40), headers={"accept": "text/event-stream"}) as r:
+                    self._resp = r
+                    if r.status_code != 200:
+                        raise ApiError(f"HTTP {r.status_code} /api/stream")
+                    hello_seen = False
+                    frame: dict[str, str] = {}
+                    for raw in r.iter_lines(decode_unicode=True):
+                        if self._stop.is_set():
+                            return
+                        if raw is None:
+                            continue
+                        line = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
+                        if line == "":
+                            if "data" in frame:
+                                ev = json.loads(frame["data"])
+                                if ev.get("id") is not None:
+                                    self.last_id = int(ev["id"])
+                                if isinstance(ev.get("ts_emit"), (int, float)):
+                                    self.last_lag_s = time.time() - float(ev["ts_emit"])
+                                self.frames += 1
+                                d = ev.get("data") or {}
+                                if ev.get("type") == "session" and d.get("hello"):
+                                    hello_seen = True
+                                    if d.get("engine") != "wss":
+                                        self.on_status("unavailable", f"engine {d.get('engine') or 'none'}")
+                                        return
+                                    fails = 0
+                                    self.on_status("live", None)
+                                self.on_event(ev)
+                            frame = {}
+                            continue
+                        if line.startswith(":"):
+                            continue  # keepalive comment
+                        k, _, v = line.partition(":")
+                        frame[k] = v[1:] if v.startswith(" ") else v
+                    if not hello_seen:
+                        raise ApiError("stream ended before the hello")
+            except Exception as e:  # noqa: BLE001 - transport: back off and resume from the last id
+                if self._stop.is_set():
+                    return
+                fails += 1
+                self.reconnects += 1
+                self.on_status("reconnecting", f"{type(e).__name__}: {str(e)[:80]}")
+                self._stop.wait(min(self.backoff_max_s, 0.5 * (2 ** min(fails, 5))))
+        self.on_status("off", None)
 
 
 class ApiClient:
@@ -80,3 +176,19 @@ class ApiClient:
 
     def wallet(self, addr: str) -> dict[str, Any]:
         return self._get(f"/api/wallet/{addr}")
+
+    # ---- stage 7 ----
+    def paper(self, closed_limit: int = 100) -> dict[str, Any]:
+        return self._get("/api/paper", {"closed_limit": closed_limit})
+
+    def track_record(self) -> dict[str, Any]:
+        return self._get("/api/track-record", {"alerts_limit": 0})
+
+    def perf(self) -> dict[str, Any]:
+        return self._get("/api/perf")
+
+    def open_stream(self, on_event: Callable[[dict[str, Any]], None], on_status: Callable[[str, str | None], None], types: list[str] | None = None) -> StreamReader:
+        """Start the SSE reader thread (live mode). The caller keeps the handle and calls `.stop()` on exit."""
+        reader = StreamReader(self.base, on_event, on_status, types=types)
+        reader.start()
+        return reader

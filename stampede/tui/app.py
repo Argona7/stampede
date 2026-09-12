@@ -6,8 +6,10 @@ Everything shown is read from the API (shared session clock, event stream with c
 radar); nothing is simulated.
 
 Composition (top to bottom): brand block (mascot · wordmark or compact line · mode/clock facts · view tabs),
-the active table (FEED, RADAR or TRADERS) with the details of the selected object in the adjacent pane, hot
-rotations + activity sparkline, one line of shortcuts. Header variants by width: >= 160 columns (and >= 30
+the active table (FEED, RADAR, TRADERS or SIGNALS) with the details of the selected object in the adjacent pane, hot
+rotations + activity sparkline, one line of shortcuts. In live mode one SSE reader thread (`client.open_stream`)
+carries the engine's alerts, paper positions, radar deltas and its head -> event lag (shown after the LIVE badge);
+the feed keeps polling `/api/events` with its cursor, so `N new` means exactly what it meant before. Header variants by width: >= 160 columns (and >= 30
 rows) get the README bison as 25x12 half-blocks with the block wordmark bottom-aligned to it (13 rows);
 narrower or shorter windows get a three-line header: compact wordmark + mode + chain, one status line, tabs.
 """
@@ -91,6 +93,35 @@ def verdict_line(v: dict | None) -> str:
     return " · ".join(bits) + (f"\n  plan: {plan}" if plan else "")
 
 
+def eth_s(v: float | None, d: int = 4) -> str:
+    """Signed quote amount for the ledger tables; n/a when unknown."""
+    return "n/a" if v is None else f"{v:+.{d}f}"
+
+
+def pct_s(v: float | None, d: int = 1) -> str:
+    """A fraction as a signed percent (0.12 -> +12.0%); n/a when unknown."""
+    return "n/a" if v is None else f"{v * 100:+.{d}f}%"
+
+
+def mmss(s: int | float | None) -> str:
+    if s is None:
+        return "n/a"
+    s = int(s)
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def outcome_s(value: float | None, due: int, clock: int | None) -> str:
+    """An alert outcome cell: the settled percent, the countdown on the chain clock, or why it is empty."""
+    if value is not None:
+        return f"{value:+.1f}%" if abs(value) < 1000 else f"{value / 100:+.1f}k%"
+    if clock is None:
+        return "n/a"
+    left = due - clock
+    if left > 0:
+        return f"in {mmss(left)}"
+    return "settling" if left > -300 else "no price"
+
+
 def dur(s: int | None) -> str:
     """Compact duration: 44s · 15m20s · 30m · 1h05m · 2h."""
     if s is None:
@@ -118,6 +149,21 @@ def num(s: str, style: str = TEXT) -> Text:
     return Text(s, style=style, justify="right")
 
 
+def filter_live_rows(rows: list[dict[str, Any]], preset: str) -> list[dict[str, Any]]:
+    """The /api/radar preset semantics (api/radar.py PRESETS) on rows folded from `radar_delta`: the stream carries the
+    whole ranking, the preset picks and orders like the polled endpoint does. Bots are already excluded by the engine."""
+    out = [r for r in rows if (r.get("wallets_range") or 0) >= 2]
+    if preset == "under_radar":
+        out = [r for r in out if r.get("stage") == "curve" and r.get("age_s") is not None and r["age_s"] <= 4 * 3600 and (r.get("mentions_1h") is None or r["mentions_1h"] <= 3)]
+    elif preset == "graduating":
+        out = sorted((r for r in out if r.get("stage") == "curve" and (r.get("progress") or 0) >= 0.6), key=lambda r: -(r.get("progress") or 0))
+    elif preset == "smart_rotators":
+        out = sorted((r for r in out if (r.get("quality") or 0) >= 0.55), key=lambda r: -(r.get("quality") or 0))
+    elif preset == "clean_launch":
+        out = [r for r in out if (r.get("launch") or {}).get("observed") and ((r["launch"].get("bundle_n") if r["launch"].get("bundle_n") is not None else 99) <= 2) and ((r["launch"].get("dev_buy_share") if r["launch"].get("dev_buy_share") is not None else 1) <= 0.05) and not r["launch"].get("launch_farm")]
+    return out
+
+
 class StampedeTUI(App):
     TITLE = "STAMPEDE"
     CSS = f"""
@@ -140,6 +186,8 @@ class StampedeTUI(App):
     #radar.visible {{ display: block; }}
     #traders {{ height: 1fr; background: {BG}; display: none; }}
     #traders.visible {{ display: block; }}
+    #signals {{ height: 1fr; background: {BG}; display: none; }}
+    #signals.visible {{ display: block; }}
     #feed.hidden {{ display: none; }}
     #empty {{ height: auto; color: {SECONDARY}; padding: 1 2; display: none; }}
     #empty.visible {{ display: block; }}
@@ -187,6 +235,7 @@ class StampedeTUI(App):
         Binding("1", "screen('feed')", "feed"),
         Binding("2", "screen('radar')", "radar"),
         Binding("3", "screen('traders')", "traders"),
+        Binding("4", "screen('signals')", "signals"),
         Binding("t", "tpreset('top')", "top traders"),
         Binding("m", "tpreset('smart')", "smart traders"),
         Binding("n", "tpreset('snipers')", "snipers"),
@@ -240,6 +289,21 @@ class StampedeTUI(App):
         self._traders_cells: dict[str, list[str]] = {}
         self.wallet_doc: dict[str, Any] | None = None
         self.wallet_addr: str | None = None
+        # stage 7: SIGNALS screen (alerts + paper ledger + track record) and the live event stream
+        self.signal_alerts: dict[str, dict[str, Any]] = {}  # token:clock_ts -> alert row (journal + stream)
+        self.signal_rows: list[dict[str, Any]] = []
+        self._signal_cells: dict[str, list[str]] = {}
+        self.paper_doc: dict[str, Any] | None = None
+        self.track_doc: dict[str, Any] | None = None
+        self.alerts_doc: dict[str, Any] | None = None
+        self.stream: Any = None  # StreamReader in live mode
+        self.live_status = "off"  # off | connecting | live | reconnecting | unavailable
+        self.live_detail: str | None = None
+        self.live_lag_ms: float | None = None  # engine head -> last event (session.lag_ms), the header's small number
+        self.live_rows: dict[str, dict[str, Any]] = {}  # radar_delta rows by address
+        self.live_top: list[str] = []
+        self.live_deltas = 0
+        self._live_radar_at = 0.0
         self._stream_queue: list[dict[str, Any]] = []  # history rows still to be added (streamed in over STREAM_S)
         self._stream_total = 0
         self._stream_done = 0
@@ -261,6 +325,7 @@ class StampedeTUI(App):
                 yield DataTable(id="feed", cursor_type="row", zebra_stripes=False, show_row_labels=False)
                 yield DataTable(id="radar", cursor_type="row", zebra_stripes=False, show_row_labels=False)
                 yield DataTable(id="traders", cursor_type="row", zebra_stripes=False, show_row_labels=False)
+                yield DataTable(id="signals", cursor_type="row", zebra_stripes=False, show_row_labels=False)
             with Vertical(id="detailwrap"):
                 yield Static(id="detailhead")
                 yield VerticalScroll(Static(id="detailbody"), id="detail")
@@ -279,9 +344,11 @@ class StampedeTUI(App):
         self._setup_columns(self.query_one("#feed", DataTable))
         self._setup_radar_columns(self.query_one("#radar", DataTable))
         self._setup_traders_columns(self.query_one("#traders", DataTable))
+        self._setup_signals_columns(self.query_one("#signals", DataTable))
         self.query_one("#feed", DataTable).focus()
         self.set_interval(5.0, self.radar_tick)
         self.set_interval(6.0, self.traders_tick)
+        self.set_interval(5.0, self.signals_tick)
         self.render_brand()
         self.render_status()
         self.render_feedhead()
@@ -421,6 +488,12 @@ class StampedeTUI(App):
             self._traders_cells.clear()
             trows, self.traders_rows = self.traders_rows, []
             self._fill_traders(trows)
+            sg = self.query_one("#signals", DataTable)
+            sg.clear(columns=True)
+            self._setup_signals_columns(sg)
+            self._signal_cells.clear()
+            self.signal_rows = []
+            self._fill_signals()
 
     # ---- polling (thread worker -> main thread) ----
     def poll_tick(self) -> None:
@@ -506,6 +579,8 @@ class StampedeTUI(App):
         self.session = out["session"]
         self.last_clock = self.session.get("clock_ts")
         self.last_clock_wall = time.time()
+        if self.session.get("mode") == "live" and self.stream is None and hasattr(self.client, "open_stream"):
+            self._start_live_stream()
         table = self.query_one("#feed", DataTable)
         pages = out.get("events", [])
         if out.get("seek") or self.cursor is None:
@@ -685,7 +760,13 @@ class StampedeTUI(App):
 
     def _radar_loaded(self, doc: dict[str, Any]) -> None:
         self.radar_doc = doc
-        self._fill_radar(doc.get("rows", []))
+        if self.live_status == "live" and self.live_deltas and self.live_top:
+            # the stream feeds the table every block; the poll only refreshes total / presets / context
+            self._live_radar_at = 0.0
+            rows = [self.live_rows[a] for a in self.live_top if a in self.live_rows]
+            self._fill_radar(filter_live_rows(rows, self.radar_preset)[:40])
+        else:
+            self._fill_radar(doc.get("rows", []))
         self.render_feedhead()
         if self.screen_mode == "radar" and self.detail_mode == "summary":
             self.render_detail()
@@ -746,6 +827,345 @@ class StampedeTUI(App):
             return next((r for r in self.radar_rows if r["address"] == row_key.value), None)
         except Exception:  # noqa: BLE001
             return None
+
+    # ---- signals screen (stage 7): alerts with outcomes, the paper ledger, the track record ----
+    def _signals_columns(self) -> list[tuple[str, str, int]]:
+        wide = self._wide()
+        head = [("", "mark", 1), ("CLOCK", "time", 8), ("RULE", "rule", 5)]
+        tail = [("P2X", "p", 4), ("SIZE", "size", 6), ("+30M", "o30", 9), ("+60M", "o60", 9)]
+        if wide:
+            tail = [("P2X", "p", 4), ("EV", "ev", 8), ("SIZE", "size", 6), ("IN", "inflow", 3), ("+30M", "o30", 9), ("+60M", "o60", 9), ("PAPER", "paper", 12)]
+        ncols = len(head) + len(tail) + 1
+        inner = self._feed_pane_width() - 2
+        used = sum(w for _, _, w in head + tail) + 2 * ncols
+        coin_w = max(8, min(18, inner - used))
+        return head + [("COIN", "coin", coin_w)] + tail
+
+    def _setup_signals_columns(self, table: DataTable) -> None:
+        for label, key, w in self._signals_columns():
+            table.add_column(label, key=key, width=w)
+
+    def signals_tick(self) -> None:
+        if self.screen_mode == "signals":
+            self.fetch_signals()
+
+    @work(thread=True, exclusive=True, group="signals")
+    def fetch_signals(self) -> None:
+        try:
+            out = {"alerts": self.client.alerts(), "paper": self.client.paper()}
+            try:
+                out["track"] = self.client.track_record()
+            except ApiError:
+                out["track"] = None
+            self._deliver(self._signals_loaded, out)
+        except ApiError as e:
+            self._deliver(self.apply_error, str(e))
+
+    def _signals_loaded(self, out: dict[str, Any]) -> None:
+        self.alerts_doc = out.get("alerts")
+        for a in (self.alerts_doc or {}).get("alerts", []):
+            key = f"{a['token']}:{a['clock_ts']}"
+            prev = self.signal_alerts.get(key)
+            if prev:  # the journal row wins on identity; outcomes settled on the stream survive a stale poll
+                a = {**a, "outcome_30m": a.get("outcome_30m") if a.get("outcome_30m") is not None else prev.get("outcome_30m"), "outcome_60m": a.get("outcome_60m") if a.get("outcome_60m") is not None else prev.get("outcome_60m")}
+            self.signal_alerts[key] = a
+        if out.get("paper") is not None:
+            self.paper_doc = out["paper"]
+        if out.get("track") is not None:
+            self.track_doc = out["track"]
+        self._fill_signals()
+        self.render_feedhead()
+        if self.screen_mode == "signals" and self.detail_mode == "summary":
+            self.render_detail()
+
+    def _paper_for(self, token: str) -> dict[str, Any] | None:
+        d = self.paper_doc or {}
+        pos = (d.get("positions") or {})
+        for p in pos.get("open", []):
+            if p["token"] == token:
+                return p
+        for p in pos.get("closed", []):
+            if p["token"] == token:
+                return p
+        return None
+
+    def _signal_cell_values(self, a: dict[str, Any]) -> dict[str, tuple[str, str]]:
+        d = a.get("detail") or {}
+        enter = a.get("rule") == "edge_enter"
+        clock = (self.session or {}).get("clock_ts")
+        coin_w = next((w for _, k, w in self._signals_columns() if k == "coin"), 12)
+        p = d.get("p_2x_30m")
+        ev = d.get("ev_per_trade_quote")
+        size = d.get("size_quote")
+        o30, o60 = outcome_s(a.get("outcome_30m"), int(a["clock_ts"]) + 1800, clock), outcome_s(a.get("outcome_60m"), int(a["clock_ts"]) + 3600, clock)
+        pp = self._paper_for(a["token"]) if enter else None
+        if pp is None:
+            paper = ""
+        elif pp.get("status") == "open":
+            paper = f"open {pct_s(pp.get('ret'), 0)}"
+        else:
+            paper = f"{(pp.get('exit_reason') or '?')[:5]} {eth_s(pp.get('pnl_quote'))}"
+
+        def out_style(v: Any, text: str) -> str:
+            if v is None:
+                return MUTED if text in ("n/a", "no price", "settling") else SECONDARY
+            return TEXT if v > 0 else SECONDARY
+
+        return {
+            "mark": ("▌" if a.get("_fresh") else " ", PRIMARY),
+            "time": (utc(a.get("clock_ts")), SECONDARY),
+            "rule": ("ENTER" if enter else "radar", f"bold {PRIMARY}" if enter else MUTED),
+            "coin": (fit(a.get("symbol") or "?", coin_w), f"bold {TEXT}"),
+            "p": (f"{p * 100:.0f}%" if p is not None else "n/a", TEXT if p is not None else MUTED),
+            "ev": (eth_s(ev) if ev is not None else "n/a", SECONDARY if ev is not None else MUTED),
+            "size": (f"{size:.4f}" if size is not None else "n/a", SECONDARY if size is not None else MUTED),
+            "inflow": (str(a.get("inflow", "")), SECONDARY),
+            "o30": (o30, out_style(a.get("outcome_30m"), o30)),
+            "o60": (o60, out_style(a.get("outcome_60m"), o60)),
+            "paper": (paper, TEXT if paper.startswith("open") or (pp or {}).get("pnl_quote", 0) is not None and (pp or {}).get("pnl_quote", 0) > 0 else SECONDARY),
+        }
+
+    def _fill_signals(self) -> None:
+        table = self.query_one("#signals", DataTable)
+        cols = self._signals_columns()
+        rows = sorted(self.signal_alerts.values(), key=lambda a: (-int(a["clock_ts"]), -int(a.get("id") or 0)))[:200]
+        same_order = [f"{a['token']}:{a['clock_ts']}" for a in rows] == [f"{a['token']}:{a['clock_ts']}" for a in self.signal_rows] and table.row_count == len(rows)
+        cur = self._selected_signal_row()
+        cur_key = f"{cur['token']}:{cur['clock_ts']}" if cur else None
+        self.signal_rows = rows
+        left = ("coin", "rule", "paper", "mark")
+        if same_order:
+            for a in rows:
+                key = f"{a['token']}:{a['clock_ts']}"
+                vals = self._signal_cell_values(a)
+                shown = self._signal_cells.get(key, [])
+                new_plain = []
+                for ci, (_, k, w) in enumerate(cols):
+                    plain, style = vals[k]
+                    new_plain.append(plain + "|" + style)
+                    if ci < len(shown) and shown[ci] == new_plain[-1]:
+                        continue
+                    table.update_cell(key, k, Text(plain, style=style, justify="left" if k in left else "right"), update_width=False)
+                self._signal_cells[key] = new_plain
+            return
+        scroll_y = table.scroll_y
+        table.clear()
+        self._signal_cells.clear()
+        for a in rows:
+            key = f"{a['token']}:{a['clock_ts']}"
+            vals = self._signal_cell_values(a)
+            cells, plain_row = [], []
+            for _, k, w in cols:
+                plain, style = vals[k]
+                plain_row.append(plain + "|" + style)
+                cells.append(Text(plain, style=style, justify="left" if k in left else "right"))
+            table.add_row(*cells, key=key)
+            self._signal_cells[key] = plain_row
+        if rows:
+            idx = next((i for i, a in enumerate(rows) if f"{a['token']}:{a['clock_ts']}" == cur_key), 0)
+
+            def _restore() -> None:
+                try:
+                    table.scroll_y = scroll_y
+                    table.move_cursor(row=idx, scroll=True)
+                except NoMatches:
+                    pass
+
+            self.call_after_refresh(_restore)
+
+    def _selected_signal_row(self) -> dict[str, Any] | None:
+        try:
+            table = self.query_one("#signals", DataTable)
+        except NoMatches:
+            return None
+        if table.row_count == 0:
+            return None
+        try:
+            row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+            return self.signal_alerts.get(str(row_key.value))
+        except Exception:  # noqa: BLE001
+            return None
+
+    def render_signals_summary(self, t: Text) -> None:
+        """Right pane of SIGNALS: the selected alert (p, EV, size, plan, outcome, its paper position), then the ledger
+        statistics with the CI, open positions with the live mark, closed positions, and the track record."""
+        narrow = self._narrow()
+        clock = (self.session or {}).get("clock_ts")
+        a = self._selected_signal_row()
+        d = self.paper_doc or {}
+        st = d.get("stats") or {}
+        pos = d.get("positions") or {}
+
+        def fact(label: str, value: str, style: str = TEXT) -> None:
+            t.append(f"{label:<9}", style=SECONDARY)
+            t.append(value + "\n", style=style)
+
+        if a is not None:
+            det = a.get("detail") or {}
+            enter = a.get("rule") == "edge_enter"
+            t.append(f"{a.get('symbol') or '?'}", style=f"bold {TEXT}")
+            t.append(f"  {'ENTER' if enter else 'under-radar top-5'} · {utc(a.get('clock_ts'))} UTC\n", style=f"bold {PRIMARY}" if enter else SECONDARY)
+            t.append(f"{a['token']}\n", style=MUTED)
+            if enter:
+                p = det.get("p_2x_30m")
+                fact("P(2×)", f"{p * 100:.0f}% in 30 min" if p is not None else "n/a", TEXT)
+                fact("EV", f"{eth_s(det.get('ev_per_trade_quote'))} ETH per trade at size {det.get('size_quote') if det.get('size_quote') is not None else 'n/a'}", SECONDARY)
+                for line in (det.get("exit_plan") or [])[: 4 if narrow else 6]:
+                    fact("PLAN", line, SECONDARY)
+                for r in (det.get("reasons") or [])[:3]:
+                    t.append(f"  · {r}\n", style=MUTED)
+            else:
+                fact("INFLOW", f"{a.get('inflow')} wallets in 10 min · score {float(a.get('score') or 0):.0f}", SECONDARY)
+            fact("+30M", outcome_s(a.get("outcome_30m"), int(a["clock_ts"]) + 1800, clock), TEXT if (a.get("outcome_30m") or 0) > 0 else SECONDARY)
+            fact("+60M", outcome_s(a.get("outcome_60m"), int(a["clock_ts"]) + 3600, clock), TEXT if (a.get("outcome_60m") or 0) > 0 else SECONDARY)
+            pp = self._paper_for(a["token"])
+            if pp:
+                if pp.get("status") == "open":
+                    fact("PAPER", f"open · mark {pct_s(pp.get('ret'))} · unreal {eth_s(pp.get('unrealized_quote'))} ETH · peak {pct_s(pp.get('peak_ret'), 0)}", TEXT)
+                else:
+                    fact("PAPER", f"closed {pp.get('exit_reason')} · {eth_s(pp.get('pnl_quote'))} ETH" + (f" · ${pp['pnl_usd']:+.2f}" if pp.get("pnl_usd") is not None else "") + f" · hold {dur(pp.get('hold_s'))}", TEXT if (pp.get("pnl_quote") or 0) > 0 else SECONDARY)
+            t.append("\n")
+        else:
+            t.append("PAPER LEDGER · simulated\n\n", style=SECONDARY)
+        t.append("PAPER STATS · simulated fills, no order sent\n", style=SECONDARY)
+        if not st:
+            t.append("  loading…\n", style=MUTED)
+        else:
+            hr = f"{st['hit_rate'] * 100:.0f}% ({st['wins']} of {st['trades']})" if st.get("hit_rate") is not None else "n/a"
+            ex = f"{eth_s(st.get('expectancy_quote'))} ETH" + (f" ({pct_s(st.get('expectancy_pct'), 0)})" if st.get("expectancy_pct") is not None else "") if st.get("expectancy_quote") is not None else "n/a"
+            ci = f"[{eth_s(st['ci95_quote'][0])}, {eth_s(st['ci95_quote'][1])}]" if st.get("ci95_quote") else "n/a (needs 2+ coins)"
+            usd_ = f"${st['expectancy_usd']:+.2f} · {st.get('usd_known', 0)} rated" if st.get("expectancy_usd") is not None else "n/a"
+            pf = st.get("profit_factor")
+            pf_s = "n/a" if pf is None else ("∞" if pf == float("inf") else f"{pf:.2f}")
+            fact("TRADES", f"{st.get('trades', 0)} closed · {st.get('coins', 0)} coins · {st.get('open', 0)} open · {st.get('skipped_by_risk', 0)} skipped by risk")
+            fact("HIT", hr)
+            fact("EXPECT.", f"{ex} · USD {usd_}")
+            fact("95% CI", ci, SECONDARY)
+            fact("PF · DD", f"{pf_s} · max drawdown {eth_s(st.get('max_drawdown_quote'))} ETH", SECONDARY)
+            fact("TOTAL", f"{eth_s(st.get('total_quote'))} ETH · fees {st.get('fees_quote', 0):.4f}", TEXT if (st.get("total_quote") or 0) >= 0 else SECONDARY)
+            if st.get("exits"):
+                fact("EXITS", " · ".join(f"{k} {v}" for k, v in sorted(st["exits"].items(), key=lambda kv: -kv[1])), SECONDARY)
+        opens = pos.get("open", [])
+        t.append(f"\nOPEN · {len(opens)}\n", style=SECONDARY)
+        for p in opens[: 6 if narrow else 10]:
+            age = (clock - p["opened_ts"]) if clock else None
+            t.append(f"  {utc(p['opened_ts'])} {fit(p['symbol'], 12):<12} {pct_s(p.get('ret')):>8} {eth_s(p.get('unrealized_quote')):>8}" + ("" if narrow else f"  peak {pct_s(p.get('peak_ret'), 0):>6} · {mmss(age)} · {'TP✓ trail' if p.get('tp_done') else 'TP'}") + "\n", style=TEXT if (p.get("ret") or 0) >= 0 else SECONDARY)
+        if not opens:
+            t.append("  none\n", style=MUTED)
+        closed = pos.get("closed", [])
+        t.append(f"\nCLOSED · {len(closed)}\n", style=SECONDARY)
+        for p in closed[: 6 if narrow else 12]:
+            t.append(f"  {utc(p['opened_ts'])} {fit(p['symbol'], 12):<12} {(p.get('exit_reason') or '?')[:14]:<14} {eth_s(p.get('pnl_quote')):>8}" + ("" if narrow else f"  {('$' + format(p['pnl_usd'], '+.2f')) if p.get('pnl_usd') is not None else 'USD n/a':>10} · {dur(p.get('hold_s'))}") + "\n", style=TEXT if (p.get("pnl_quote") or 0) > 0 else SECONDARY)
+        if not closed:
+            t.append("  none yet\n", style=MUTED)
+        tr = self.track_doc or {}
+        by_rule = (tr.get("alerts") or {}).get("by_rule") or {}
+        t.append("\nTRACK RECORD\n", style=SECONDARY)
+        for rule, x in by_rule.items():
+            name = "ENTER" if rule == "edge_enter" else rule
+            m30 = f"{x['median_30m']:+.0f}%" if x.get("median_30m") is not None else "n/a"
+            m60 = f"{x['median_60m']:+.0f}%" if x.get("median_60m") is not None else "n/a"
+            t.append(f"  {name}: {x['fired']} fired · +30 known {x['with_outcome_30m']} · up {x['up_30m']} · ≥2× {x['ge_2x_30m']} · median +30 {m30} · +60 {m60}\n", style=TEXT)
+        if not by_rule:
+            t.append("  no alerts in this mode yet\n", style=MUTED)
+        pf_ = tr.get("perf")
+        if pf_:
+            t.append(f"  run: uptime {dur(int(pf_['uptime_s'] or 0))} · {pf_.get('blocks_processed') or 0:,} blocks · gaps {pf_.get('gaps_found')} · unfilled {pf_.get('gaps_unfilled_blocks')} · head→event p50 {pf_.get('latency_p50_ms')} ms · p95 {pf_.get('latency_p95_ms')} ms\n", style=SECONDARY)
+        if tr.get("since_ts"):
+            t.append(f"  counting from the engine start {utc(tr['since_ts'])} UTC\n", style=MUTED)
+        t.append("\nEnter: coin card of the selected alert · ↑/↓ select · outcomes = price change on indexed trades, pnl = simulated fills", style=MUTED)
+
+    # ---- live event stream (SSE) ----
+    def _start_live_stream(self) -> None:
+        self.live_status = "connecting"
+        self.stream = self.client.open_stream(lambda ev: self._deliver(self._on_stream_event, ev), lambda s, d: self._deliver(self._on_stream_status, s, d), types=["session", "alert", "position", "radar_delta"])
+
+    def _on_stream_status(self, status: str, detail: str | None) -> None:
+        self.live_status = status
+        self.live_detail = detail
+        if status != "live":
+            self.live_lag_ms = None
+        try:
+            self.render_status()
+            self.render_feedhead()
+        except NoMatches:
+            pass
+
+    def _on_stream_event(self, ev: dict[str, Any]) -> None:
+        typ = ev.get("type")
+        d = ev.get("data") or {}
+        try:
+            if typ == "session":
+                lag = float(d["lag_ms"]) if d.get("lag_ms") is not None else None
+                changed = lag != self.live_lag_ms or self.live_status != "live"
+                self.live_lag_ms = lag
+                self.live_status = "live"
+                if changed:
+                    self.render_status()
+                if self.screen_mode == "signals":
+                    self.render_feedhead()
+            elif typ == "alert":
+                key = d.get("key") or f"{d.get('token')}:{d.get('clock_ts')}"
+                prev = self.signal_alerts.get(key)
+                if d.get("kind") == "fired":
+                    row = {k: d.get(k) for k in ("created_ts", "clock_ts", "mode", "token", "symbol", "rule", "score", "inflow", "mentions_1h", "price", "detail")}
+                    row.update({"id": (prev or {}).get("id") or 0, "outcome_30m": (prev or {}).get("outcome_30m"), "outcome_60m": (prev or {}).get("outcome_60m"), "graduated_after": (prev or {}).get("graduated_after"), "_fresh": True})
+                    self.signal_alerts[key] = row
+                    self.set_timer(2.5, lambda k=key: self._unfresh_signal(k))
+                elif prev is not None:
+                    for k in ("outcome_30m", "outcome_60m", "graduated_after"):
+                        if d.get(k) is not None:
+                            prev[k] = d[k]
+                if self.screen_mode == "signals":
+                    self._fill_signals()
+                    self.render_feedhead()
+                    if self.detail_mode == "summary":
+                        self.render_detail()
+            elif typ == "position":
+                if d.get("kind") == "skipped" or self.paper_doc is None:
+                    return
+                pos = self.paper_doc.setdefault("positions", {"open": [], "closed": [], "pending": []})
+                pos["open"] = [p for p in pos.get("open", []) if p["id"] != d["id"]]
+                pos["closed"] = [p for p in pos.get("closed", []) if p["id"] != d["id"]]
+                if d.get("status") == "closed":
+                    pos["closed"].insert(0, d)
+                else:
+                    pos["open"].append(d)
+                    pos["open"].sort(key=lambda p: p["id"])
+                if self.screen_mode == "signals":
+                    self._fill_signals()
+                    if self.detail_mode == "summary":
+                        self.render_detail()
+            elif typ == "radar_delta":
+                self._apply_radar_delta(d)
+        except NoMatches:
+            pass
+
+    def _unfresh_signal(self, key: str) -> None:
+        a = self.signal_alerts.get(key)
+        if a and a.get("_fresh"):
+            a["_fresh"] = False
+            if self.screen_mode == "signals":
+                try:
+                    self._fill_signals()
+                except NoMatches:
+                    pass
+
+    def _apply_radar_delta(self, d: dict[str, Any]) -> None:
+        if d.get("full"):
+            self.live_rows.clear()
+        for r in d.get("rows", []):
+            self.live_rows[r["address"]] = r
+        for a in d.get("removed", []):
+            self.live_rows.pop(a, None)
+        if d.get("top"):
+            self.live_top = list(d["top"])
+        self.live_deltas += 1
+        now = time.time()
+        if self.screen_mode == "radar" and now - self._live_radar_at >= 0.5:
+            self._live_radar_at = now
+            rows = [self.live_rows[a] for a in self.live_top if a in self.live_rows]
+            self._fill_radar(filter_live_rows(rows, self.radar_preset)[:40])
 
     # ---- traders screen ----
     def traders_tick(self) -> None:
@@ -961,16 +1381,18 @@ class StampedeTUI(App):
         t.append("\nEnter: wallet card (positions, coins, trades, copy-test note)", style=MUTED)
 
     def action_screen(self, name: str) -> None:
-        if name not in ("feed", "radar", "traders") or name == self.screen_mode:
+        if name not in ("feed", "radar", "traders", "signals") or name == self.screen_mode:
             return
         self.screen_mode = name
         feed = self.query_one("#feed", DataTable)
         rt = self.query_one("#radar", DataTable)
         tt = self.query_one("#traders", DataTable)
+        sg = self.query_one("#signals", DataTable)
         feed.set_class(name != "feed", "hidden")
         rt.set_class(name == "radar", "visible")
         tt.set_class(name == "traders", "visible")
-        {"feed": feed, "radar": rt, "traders": tt}[name].focus()
+        sg.set_class(name == "signals", "visible")
+        {"feed": feed, "radar": rt, "traders": tt, "signals": sg}[name].focus()
         self.detail_mode = "summary"
         self.edge_doc = None
         self.coin_doc = None
@@ -979,6 +1401,8 @@ class StampedeTUI(App):
             self.fetch_radar()
         elif name == "traders":
             self.fetch_traders()
+        elif name == "signals":
+            self.fetch_signals()
         self.render_brand()
         self.render_feedhead()
         self.render_detail()
@@ -1198,6 +1622,13 @@ class StampedeTUI(App):
             if age is not None and age > STALE_AFTER_S:
                 b.append(" ! STALE ", style=f"bold {TEXT}")
                 b.append(f"data age {dur(age)}", style=PRIMARY)
+            elif self.live_status == "live":
+                # the stream is on: the engine's head -> last event latency, one small number (docs/ENGINE.md)
+                b.append(f" · {self.live_lag_ms:.0f} ms" if self.live_lag_ms is not None else " · stream", style=SECONDARY)
+            elif self.live_status == "reconnecting":
+                b.append(" · RECONNECTING", style=f"bold {TEXT}")
+            elif self.live_status == "connecting":
+                b.append(" · connecting", style=MUTED)
             return b
         if not s:
             return Text("[CONNECTING…]", style=SECONDARY)
@@ -1255,7 +1686,7 @@ class StampedeTUI(App):
 
     def _tabs_line(self) -> Text:
         t = Text()
-        for key, name, mode in (("1", "FEED", "feed"), ("2", "RADAR", "radar"), ("3", "TRADERS", "traders")):
+        for key, name, mode in (("1", "FEED", "feed"), ("2", "RADAR", "radar"), ("3", "TRADERS", "traders"), ("4", "SIGNALS", "signals")):
             active = self.screen_mode == mode
             if active:
                 t.append("▌", style=f"{PRIMARY} on {ACTIVE}")
@@ -1263,7 +1694,7 @@ class StampedeTUI(App):
             else:
                 t.append(f" {key} {name} ", style=SECONDARY)
             t.append("  ")
-        t.append("1/2/3 switch view · Tab moves between panes", style=MUTED)
+        t.append("1/2/3/4 switch view · Tab moves between panes", style=MUTED)
         return t
 
     def render_brand(self) -> None:
@@ -1350,7 +1781,23 @@ class StampedeTUI(App):
         n = len(self.events)
         table = self.query_one("#feed", DataTable)
         shown = table.row_count
-        head = self._pane_marker({"radar": "radar", "traders": "traders"}.get(self.screen_mode, "feed"))
+        head = self._pane_marker({"radar": "radar", "traders": "traders", "signals": "signals"}.get(self.screen_mode, "feed"))
+        if self.screen_mode == "signals":
+            d = self.paper_doc or {}
+            pos = d.get("positions") or {}
+            st = d.get("stats") or {}
+            n_enter = sum(1 for a in self.signal_alerts.values() if a.get("rule") == "edge_enter")
+            head.append("SIGNALS", style=f"bold {TEXT}")
+            head.append(f" · {n_enter} ENTER · {len(self.signal_alerts)} alerts", style=SECONDARY)
+            if d:
+                tot = st.get("total_quote") or 0.0
+                head.append(f" · paper {len(pos.get('open', []))} open / {len(pos.get('closed', []))} closed · {eth_s(tot)} ETH", style=TEXT if tot >= 0 else SECONDARY)
+            if (self.session or {}).get("mode") == "live":
+                head.append(f" · {'stream ' + (f'{self.live_lag_ms:.0f} ms' if self.live_lag_ms is not None else 'on') if self.live_status == 'live' else self.live_status.upper()}", style=MUTED)
+            head.append(" · simulated fills" if not self._narrow() else "", style=MUTED)
+            self.query_one("#feedhead", Static).update(head)
+            self.render_detailhead()
+            return
         if self.screen_mode == "traders":
             d = self.traders_doc or {}
             rng = d.get("range") or {}
@@ -1434,6 +1881,9 @@ class StampedeTUI(App):
         elif self.screen_mode == "radar":
             marker.append("SELECTED COIN", style=f"bold {TEXT}")
             marker.append(" · Enter opens the card", style=SECONDARY)
+        elif self.screen_mode == "signals":
+            marker.append("PAPER LEDGER", style=f"bold {TEXT}")
+            marker.append(" · simulated · Enter opens the coin card", style=SECONDARY)
         else:
             marker.append("SELECTED PAIR", style=f"bold {TEXT}")
             marker.append(" · Enter opens the evidence", style=SECONDARY)
@@ -1479,6 +1929,8 @@ class StampedeTUI(App):
             self.render_radar_summary(t)
         elif self.screen_mode == "traders":
             self.render_traders_summary(t)
+        elif self.screen_mode == "signals":
+            self.render_signals_summary(t)
         else:
             row = self._selected_event()
             if row is None:
@@ -1583,8 +2035,10 @@ class StampedeTUI(App):
         if self.screen_mode == "radar":
             return [(0, "↑/↓ select"), (0, "Enter coin card"), (1, "Esc back"), (2, "presets u under radar · g graduating · s smart rotators · a all"), (1, "Tab details"), (0, "1 feed"), (0, "3 traders"), *ctl, (0, "q quit")]
         if self.screen_mode == "traders":
-            return [(0, "↑/↓ select"), (0, "Enter wallet card"), (1, "Esc back"), (2, "presets t top · m smart · n snipers · b bots"), (1, "Tab details"), (0, "1 feed"), (0, "2 radar"), *ctl, (0, "q quit")]
-        return [(0, "↑/↓ select"), (0, "Enter evidence"), (1, "Esc back"), (0, "/ search"), (1, "End follow latest"), (1, "Tab details"), (0, "2 radar"), (0, "3 traders"), *ctl, (0, "q quit")]
+            return [(0, "↑/↓ select"), (0, "Enter wallet card"), (1, "Esc back"), (2, "presets t top · m smart · n snipers · b bots"), (1, "Tab details"), (0, "1 feed"), (0, "2 radar"), (0, "4 signals"), *ctl, (0, "q quit")]
+        if self.screen_mode == "signals":
+            return [(0, "↑/↓ select alert"), (0, "Enter coin card"), (1, "Esc back"), (1, "Tab ledger"), (0, "1 feed"), (0, "2 radar"), (0, "3 traders"), *ctl, (0, "q quit")]
+        return [(0, "↑/↓ select"), (0, "Enter evidence"), (1, "Esc back"), (0, "/ search"), (1, "End follow latest"), (1, "Tab details"), (0, "2 radar"), (0, "3 traders"), (0, "4 signals"), *ctl, (0, "q quit")]
 
     def _render_keys(self) -> None:
         hints = self._key_hints()
@@ -1603,7 +2057,7 @@ class StampedeTUI(App):
 
     # ---- focus / panes ----
     def _active_table(self) -> DataTable:
-        return self.query_one({"radar": "#radar", "traders": "#traders"}.get(self.screen_mode, "#feed"), DataTable)
+        return self.query_one({"radar": "#radar", "traders": "#traders", "signals": "#signals"}.get(self.screen_mode, "#feed"), DataTable)
 
     def _panes(self) -> list[Any]:
         table = self._active_table()
@@ -1654,7 +2108,7 @@ class StampedeTUI(App):
             if self.detail_mode == "summary":
                 self.render_detail()
             self.render_feedhead()
-        elif table.id in ("radar", "traders") and self.detail_mode == "summary":
+        elif table.id in ("radar", "traders", "signals") and self.detail_mode == "summary":
             self.render_detail()
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected) -> None:
@@ -1668,6 +2122,16 @@ class StampedeTUI(App):
         self._open_selected()
 
     def _open_selected(self) -> None:
+        if self.screen_mode == "signals":
+            a = self._selected_signal_row()
+            if a:
+                self.coin_addr = a["token"]
+                self.detail_mode = "coin"
+                self.coin_doc = None
+                self.query_one("#detailbody", Static).update(Text(f"{a.get('symbol') or '?'}\nloading coin card…", style=SECONDARY))
+                self.render_detailhead()
+                self.load_coin(a["token"])
+            return
         if self.screen_mode == "traders":
             r = self._selected_trader_row()
             if r:
@@ -1763,7 +2227,7 @@ class StampedeTUI(App):
         if fid == "detail":
             focused.scroll_end(animate=False) if last else focused.scroll_home(animate=False)
             return
-        if self.screen_mode in ("radar", "traders"):
+        if self.screen_mode in ("radar", "traders", "signals"):
             rt = self._active_table()
             if rt.row_count:
                 rt.move_cursor(row=rt.row_count - 1 if last else 0, scroll=True)
@@ -1816,7 +2280,11 @@ class StampedeTUI(App):
         self.poll_tick()
 
     def on_unmount(self) -> None:
-        pass
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def main_terminal(args) -> int:
