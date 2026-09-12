@@ -253,6 +253,10 @@ def test_incremental_sequences_equal_rotate_on_the_same_trades(tmp_path):
             # before the clock jumps: B has one main inflow wallet (W1 clean; W2's rows are ambiguous), C one (W3 direct)
             assert st.rows[TOKEN_B]["wallets_range"] == 1 and st.rows[TOKEN_B]["inflow_10m"] == 1 and st.rows[TOKEN_B]["symbol"] == "BBB" and st.rows[TOKEN_B]["sources"][0]["symbol"] == "AAA"
             assert st.rows[TOKEN_C]["wallets_range"] == 1 and st.rows[TOKEN_B]["age_s"] == 1400 - 900 and st.rows[TOKEN_B]["stage"] == "curve"
+            from stampede.api import radar as radar_mod
+
+            if hasattr(radar_mod, "attach_verdicts"):  # stage 4 present: every emitted row carries its verdict, the feature dict never leaks
+                assert st.rows[TOKEN_B]["verdict"]["action"] in ("ENTER", "WAIT", "AVOID") and "_vf" not in st.rows[TOKEN_B]
         events, wb, timing = st.apply_block(b)
         all_events.extend(events)
         seq_rows.extend(wb.sequences)

@@ -218,6 +218,7 @@ class EngineState:
         self.cs_cache: dict[str, tuple[int, int, dict[str, Any]]] = {}
         self.rows: dict[str, dict[str, Any]] = {}
         self.ranked: list[dict[str, Any]] = []
+        self.last_verdict: dict[str, str] = {}
         self.block_ts: OrderedDict[int, int] = OrderedDict()
         self.clock: int = 0
         self.last_tick: int = 0
@@ -445,6 +446,7 @@ class EngineState:
         rank_of = {r["address"]: i for i, r in enumerate(self.ranked, 1)}
         for r in self.rows.values():
             r["rank"] = rank_of.get(r["address"])
+        verdict_changes = self._attach_verdicts(changed, block.number, clock)
         t_radar = time.time()
         # 6. alerts
         fired, outcomes = self._alerts(clock, block.number, wb)
@@ -467,6 +469,7 @@ class EngineState:
         if changed or removed:
             events.append(("radar_delta", {"full": False, "reason": "tick" if tick else "block", "clock": clock, "window_s": self.window_s, "span_s": self.span_s, "rows": sorted(changed, key=lambda r: -r["score"]), "removed": removed, "top": [r["address"] for r in self.ranked[:50]]}))
         events.extend(("alert", a) for a in fired + outcomes)
+        events.extend(("verdict", v) for v in verdict_changes)
         if not block.is_fragment:
             wb.meta["engine_cursor"] = block.number
         self.stats["blocks"] += 1
@@ -677,7 +680,41 @@ class EngineState:
         hd = self.context["holders"].get(tok)
         if hd and "holders" in hd:
             row["holders"] = {k: hd.get(k) for k in ("holders", "top10_share", "dev_share", "dev_sold_share", "launch_block_buyers", "as_of_block")}
+        # stage 4: the verdict feature dict from the row and the coin's last hour of trades (same tuple shape as the SQL
+        # radar); `attach_verdicts` turns it into row['verdict'] once per block for the touched rows
+        vf = getattr(radar_mod, "verdict_features", None)
+        if vf is not None:
+            try:
+                dq = self.coin_trades.get(tok)
+                row["_vf"] = vf(row, [r for r in dq if r[0] <= clock] if dq else [], clock, self.qdec, (la or {}).get("deployer"))
+            except Exception:  # noqa: BLE001 - the verdict must never take the engine down
+                row.pop("_vf", None)
         return row
+
+    def _attach_verdicts(self, rows: list[dict[str, Any]], block: int, clock: int) -> list[dict[str, Any]]:
+        """row['verdict'] via the stage-4 batched call (model or calibrated rules); a `verdict` event per coin whose
+        action changed (ENTER / WAIT / AVOID). Absent or failing stage-4 code leaves the rows without a verdict."""
+        att = getattr(radar_mod, "attach_verdicts", None)
+        if att is None or not rows:
+            for r in rows:
+                r.pop("_vf", None)
+            return []
+        try:
+            att(rows)
+        except Exception:  # noqa: BLE001
+            for r in rows:
+                r.pop("_vf", None)
+            return []
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            v = r.get("verdict") or {}
+            action = v.get("action")
+            prev = self.last_verdict.get(r["address"])
+            if action and action != prev:
+                self.last_verdict[r["address"]] = action
+                if prev is not None or action == "ENTER":
+                    out.append({"token": r["address"], "symbol": r["symbol"], "action": action, "previous": prev, "verdict": v, "score": r["score"], "rank": r.get("rank"), "block": block, "clock": clock})
+        return out
 
     def _expire(self, clock: int) -> list[str]:
         lo = clock - self.span_s
@@ -690,6 +727,7 @@ class EngineState:
                 del self.coin_seqs[tok]
                 if tok in self.rows:
                     del self.rows[tok]
+                    self.last_verdict.pop(tok, None)
                     removed.append(tok)
         return removed
 
