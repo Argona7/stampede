@@ -338,7 +338,7 @@ test('view tabs are keyboard operable with distinct active and focus states', as
   const idle = await page.getByTestId('view-map').evaluate((el) => getComputedStyle(el).boxShadow)
   expect(idle).not.toContain('rgb(255, 51, 68)')
   await page.keyboard.press('End')
-  await expect(page.getByTestId('view-traders')).toHaveAttribute('aria-selected', 'true') // the last tab is TRADERS (stage 2)
+  await expect(page.getByTestId('view-signals')).toHaveAttribute('aria-selected', 'true') // the last tab is SIGNALS (stage 7)
 })
 
 test('flow view draws readable ribbons for the top radar coin and links to evidence', async ({ page }) => {

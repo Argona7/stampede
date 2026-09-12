@@ -1,10 +1,19 @@
 import { useRef } from 'react'
 import { duration, utc } from '../format'
+import { fmtLag, type LiveStatus } from '../live'
 import type { SessionState, Status } from '../types'
 
-export type View = 'radar' | 'flow' | 'map' | 'traders'
-const VIEWS: View[] = ['radar', 'flow', 'map', 'traders']
+export type View = 'radar' | 'flow' | 'map' | 'traders' | 'signals'
+const VIEWS: View[] = ['radar', 'flow', 'map', 'traders', 'signals']
 const SPEEDS = [1, 10, 20, 60]
+
+export interface LiveBadge {
+  status: LiveStatus
+  /** engine head → last event published, p50 ms from /api/perf (the programme number); null without an engine */
+  lagMs: number | null
+  /** publish stamp → arrival of the newest frame at this client, ms */
+  clientLagMs: number | null
+}
 
 interface Props {
   status: Status | null
@@ -12,14 +21,16 @@ interface Props {
   statusError: string | null
   view: View
   startView: View
+  live?: LiveBadge
   onView: (v: View) => void
   onHome: () => void
   onControl: (action: string, extra?: Record<string, number | undefined>) => void
 }
 
 /** Persistent top strip: brand · views · session state · the primary replay controls. Secondary controls live
- *  in each view's working row. */
-export default function TopStrip({ status, session, statusError, view, startView, onView, onHome, onControl }: Props) {
+ *  in each view's working row. In live mode the badge carries the stream state: `LIVE · 120 ms` (engine head → event
+ *  latency, one small number), `LIVE · RECONNECTING`, `LIVE · STALE`; without an engine the modes read as before. */
+export default function TopStrip({ status, session, statusError, view, startView, live, onView, onHome, onControl }: Props) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([])
   const mode = session?.mode ?? status?.mode ?? 'fixture'
   const conn = status?.connection
@@ -29,9 +40,24 @@ export default function TopStrip({ status, session, statusError, view, startView
       ? `Provider error · ${status?.live?.last_error ?? 'no connection'} · frozen at the last good block`
       : null
   const paused = mode === 'replay' && !!session && !session.playing
-  const badgeClass = mode === 'live' ? (conn === 'stale' ? 'stale' : 'live') : mode === 'replay' ? (paused ? 'paused' : 'replay') : 'fixture'
+  const reconnecting = mode === 'live' && live?.status === 'reconnecting'
+  const badgeClass = mode === 'live' ? (conn === 'stale' ? 'stale' : reconnecting ? 'reconnecting' : 'live') : mode === 'replay' ? (paused ? 'paused' : 'replay') : 'fixture'
   const speedTxt = session?.speed ? `${Number.isInteger(session.speed) ? session.speed : session.speed.toFixed(1)}×` : ''
-  const badgeText = mode === 'live' ? (conn === 'stale' ? 'LIVE · STALE' : 'LIVE') : mode === 'replay' ? (paused ? `PAUSED · REPLAY ${speedTxt}` : `REPLAY ${speedTxt}`) : 'RECORDED'
+  const lag = live?.lagMs ?? live?.clientLagMs ?? null
+  const liveText = conn === 'stale' ? 'LIVE · STALE' : reconnecting ? 'LIVE · RECONNECTING' : live?.status === 'live' && lag !== null ? `LIVE · ${fmtLag(lag)}` : 'LIVE'
+  const badgeText = mode === 'live' ? liveText : mode === 'replay' ? (paused ? `PAUSED · REPLAY ${speedTxt}` : `REPLAY ${speedTxt}`) : 'RECORDED'
+  const badgeTitle =
+    mode === 'live'
+      ? live?.status === 'live'
+        ? `stream connected · engine head → last event p50 ${live.lagMs !== null ? fmtLag(live.lagMs) : 'n/a'} · this client receives frames ${live.clientLagMs !== null ? fmtLag(live.clientLagMs) : 'n/a'} after publish`
+        : reconnecting
+          ? 'the event stream dropped; the browser is reconnecting with Last-Event-ID, missed events replay from the ring'
+          : live?.status === 'unavailable'
+            ? 'no event stream in this process (polling tail): views poll'
+            : 'connecting to /api/stream'
+      : mode === 'replay'
+        ? 'recorded sample played back on the shared session clock; views poll'
+        : 'recorded sample, not live'
   const clock = session?.clock_ts ?? null
   const span = session?.span_s ?? 1800
   const age = status?.data.age_s ?? null
@@ -92,7 +118,7 @@ export default function TopStrip({ status, session, statusError, view, startView
             {errorText}
           </span>
         ) : (
-          <span className={`badge ${badgeClass}`} data-testid="mode">
+          <span className={`badge ${badgeClass}`} data-testid="mode" title={badgeTitle} data-live={mode === 'live' ? live?.status ?? 'off' : 'n/a'}>
             {badgeText}
           </span>
         )}

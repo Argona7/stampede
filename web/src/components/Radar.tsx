@@ -23,6 +23,7 @@ interface Props {
   onFlow: (address: string) => void
   onPick: (address: string) => void // search result
   freshTokens: Map<string, number> // token -> performance.now() of the last inflow bump
+  streaming?: boolean // rows arrive from /api/stream radar_delta (live engine) instead of the 4-s poll
 }
 
 const SORTS: [string, string, string][] = [
@@ -102,7 +103,7 @@ const verdictText = (r: RadarRow) => {
   return `${v.action}${p}` // the size and the plan live in the tooltip and the drawer: the column stays 75 px
 }
 
-export default function Radar({ data, alerts, session, error, filters, setFilters, selected, active, onSelect, onMove, onFlow, onPick, freshTokens }: Props) {
+export default function Radar({ data, alerts, session, error, filters, setFilters, selected, active, onSelect, onMove, onFlow, onPick, freshTokens, streaming = false }: Props) {
   const presets = data?.presets ?? {}
   const presetKeys = Object.keys(presets).length ? Object.keys(presets) : PRESET_ORDER
   const [now, setNow] = useState(0)
@@ -216,7 +217,7 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
     if (filters.preset === 'clean_launch') bits.push('launch intel known: bundle ≤ 2, dev buy ≤ 5%, not a farm')
     return bits.join(', ')
   }
-  const contextNote = ctx?.enabled ? 'X / market / holders context on' : mode === 'live' ? 'context warming up: X, holders and market fill in later' : 'replay · on-chain as-of numbers · X mentions and holders not fetched: n/a = unknown, not 0'
+  const contextNote = (streaming ? 'rows from the event stream, every block · ' : '') + (ctx?.enabled ? 'X / market / holders context on' : mode === 'live' ? 'context warming up: X, holders and market fill in later' : 'replay · on-chain as-of numbers · X mentions and holders not fetched: n/a = unknown, not 0')
 
   return (
     <div className={`radar ${alertsOpen ? 'alerts-open' : ''}`}>

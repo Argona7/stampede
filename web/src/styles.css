@@ -322,6 +322,11 @@ kbd {
   color: var(--secondary);
 }
 
+.badge.reconnecting {
+  border-style: dashed;
+  color: var(--secondary);
+}
+
 .badge.fixture {
   border-color: var(--muted);
   color: var(--secondary);
@@ -1984,7 +1989,9 @@ hr {
   }
 }
 
-@container (max-width: 980px) {
+/* with the wallet card open at the default 1440 width the list is 1000 px wide and the table measured 1107: the two
+   share columns go before the table would need a horizontal scroll (they stay in the card and the tooltip) */
+@container (max-width: 1040px) {
   .traders-table .t-sniper,
   .traders-table .t-rug {
     display: none;
@@ -2136,4 +2143,245 @@ hr {
 
 .wtrades .fee {
   white-space: nowrap;
+}
+
+/* ---- SIGNALS (stage 7): alert feed · paper positions · statistics + track record. Dense mono; red only for ENTER,
+   the selected row and a row that just changed. Everything in the ledger is simulated and the working row says so. */
+.signals-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.signals-main.has-drawer {
+  grid-template-columns: minmax(0, 1fr) 420px;
+}
+
+.signals {
+  height: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: var(--bar-h) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.signals .workbar .stat b {
+  color: var(--text);
+}
+
+.signals .workbar .stat b.neg {
+  color: var(--secondary);
+}
+
+.signals .faint {
+  color: var(--muted);
+}
+
+.signals-body {
+  display: grid;
+  grid-template-columns: minmax(560px, 6fr) minmax(380px, 5fr) 300px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.signals-main.has-drawer .signals-body {
+  grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr);
+}
+
+.signals-main.has-drawer .sig-stats {
+  display: none;
+}
+
+.sig-col {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  container-type: inline-size;
+  padding: 8px 12px 16px;
+  border-left: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.sig-col:first-child {
+  border-left: 0;
+}
+
+.sig-col h2 {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 6px 0 6px;
+  color: var(--secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sig-col h2 .faint {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sig-col h2.tr-head {
+  margin-top: 14px;
+}
+
+.sig-empty {
+  color: var(--muted);
+  padding: 8px 0 12px;
+  font-size: 12px;
+}
+
+.sig-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
+
+.sig-table th,
+.sig-table td {
+  height: 26px;
+  padding: 0 6px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.sig-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg);
+  color: var(--secondary);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  height: 24px;
+}
+
+.sig-table th.num,
+.sig-table td.num {
+  text-align: right;
+}
+
+.sig-table td.t {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sig-table td.coin b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sig-table td.rule {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.sig-table td.rule.enter {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.sig-table td.exit,
+.sig-table td.plan {
+  color: var(--secondary);
+  font-size: 11px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sig-table .unk {
+  color: var(--muted);
+}
+
+.sig-table .countdown {
+  color: var(--secondary);
+  font-size: 11px;
+}
+
+.sig-row {
+  cursor: pointer;
+}
+
+.sig-row:hover td {
+  background: var(--surface);
+}
+
+.sig-row.sel td {
+  background: var(--active);
+}
+
+.sig-row.sel td:first-child,
+.sig-row.fresh td:first-child {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+
+.sig-stats .kv {
+  grid-template-columns: minmax(96px, auto) minmax(0, 1fr);
+  gap: 4px 10px;
+  margin-top: 8px;
+}
+
+.sig-stats .kv span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sig-stats .kv .span2 {
+  grid-column: 1 / -1;
+  text-align: left;
+}
+
+.sig-stats .kv .rule-head {
+  color: var(--text);
+  font-weight: 500;
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+
+.sig-stats .kv .rule-head:first-child {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.eq-spark {
+  display: block;
+  margin: 2px 0 4px;
+}
+
+/* the stats column goes first when the window cannot hold three columns */
+@media (max-width: 1180px) {
+  .signals-body {
+    grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr);
+  }
+
+  .signals-body .sig-stats {
+    display: none;
+  }
+}
+
+/* the least important columns leave first as a SIGNALS column narrows (drawer open, small window) */
+@container (max-width: 560px) {
+  .sig-table .c-peak {
+    display: none;
+  }
+}
+
+@container (max-width: 500px) {
+  .sig-table .c-ev {
+    display: none;
+  }
 }

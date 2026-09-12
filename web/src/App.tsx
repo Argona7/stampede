@@ -6,9 +6,12 @@ import Flow from './components/Flow'
 import MapBar from './components/MapBar'
 import MapHud from './components/MapHud'
 import Radar from './components/Radar'
+import Signals from './components/Signals'
 import Traders from './components/Traders'
 import WalletCard from './components/WalletCard'
 import { useTraders } from './useTraders'
+import { useLive } from './useLive'
+import { LiveRadar, filterLiveRows } from './live'
 import { DEFAULT_RADAR, type RadarFilters } from './radarFilters'
 import Controls, { type Filters } from './components/Controls'
 import Details, { SequenceRow } from './components/Details'
@@ -19,15 +22,23 @@ import TopStrip, { type View } from './components/TopStrip'
 import Scene3D, { type PerfStats, type Pulse, type ViewState } from './scene/Scene3D'
 import { sessionApi } from './session'
 import { utc, windowName } from './format'
-import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Recent, Selection, SeqEvent, SessionState, Status, TokenDetail } from './types'
+import type { AlertRow, AlertsResponse, CoinDetail, EdgeDetail, Graph, PaperPosition, PaperResponse, PerfResponse, RadarDelta, RadarResponse, RadarRow, Recent, Selection, SeqEvent, SessionState, Status, StreamAlert, StreamEvent, StreamPosition, StreamSession, TokenDetail, TrackRecord } from './types'
 
 const SESSION_POLL_MS = 1000
 const EVENTS_POLL_MS = 1500
 const STATUS_POLL_MS = 5000
 const TOUR_MS = 7000
+const RADAR_POLL_MS = 4000
+const RADAR_POLL_STREAM_MS = 20000 // rows come from radar_delta; the poll only refreshes total / presets / context
+const PAPER_POLL_MS = 5000
+const PAPER_POLL_STREAM_MS = 15000 // positions come from `position` events; the poll refreshes stats / equity / CI
+const TRACK_POLL_MS = 60000
+const PERF_POLL_MS = 10000
+const DELTA_FLUSH_MS = 250
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-const asView = (v: string | null): View => (v === 'flow' || v === 'map' || v === 'traders' ? v : 'radar')
+const asView = (v: string | null): View => (v === 'flow' || v === 'map' || v === 'traders' || v === 'signals' ? v : 'radar')
+const alertKey = (a: { token: string; clock_ts: number }) => `${a.token}:${a.clock_ts}`
 
 export default function App() {
   const params = new URLSearchParams(window.location.search)
@@ -77,6 +88,90 @@ export default function App() {
   const coinNonce = useRef(0)
 
   const mode = session?.mode ?? status?.mode ?? 'fixture'
+
+  // ---- stage 7: the event stream (live mode) and the SIGNALS view's data ----
+  const liveRadar = useRef(new LiveRadar())
+  const deltaTimer = useRef<number | null>(null)
+  const [liveRows, setLiveRows] = useState<RadarRow[] | null>(null) // ranked rows folded from radar_delta; null until the first delta
+  const [liveClock, setLiveClock] = useState<number | null>(null)
+  const [liveAlerts, setLiveAlerts] = useState<Map<string, AlertRow>>(new Map()) // alerts seen on the stream (fired + settled), by token:clock
+  const [paper, setPaper] = useState<PaperResponse | null>(null)
+  const [paperError, setPaperError] = useState<string | null>(null)
+  const [track, setTrack] = useState<TrackRecord | null>(null)
+  const [enginePerf, setEnginePerf] = useState<PerfResponse | null>(null)
+  const [serverLagMs, setServerLagMs] = useState<number | null>(null)
+  const [freshKeys, setFreshKeys] = useState<Set<string>>(new Set()) // alert keys / pos:<id> that just changed (2.5 s red mark)
+  const markFresh = useCallback((keys: string[]) => {
+    if (!keys.length) return
+    setFreshKeys((s) => new Set([...s, ...keys]))
+    window.setTimeout(() => setFreshKeys((s) => {
+      const n = new Set(s)
+      for (const k of keys) n.delete(k)
+      return n
+    }), 2500)
+  }, [])
+  const onStream = useCallback((ev: StreamEvent) => {
+    if (ev.type === 'radar_delta') {
+      liveRadar.current.apply(ev.data as RadarDelta)
+      if (deltaTimer.current === null) {
+        deltaTimer.current = window.setTimeout(() => {
+          deltaTimer.current = null
+          const ranked = liveRadar.current.ranked()
+          const bumps = new Map<string, number>()
+          const now = performance.now()
+          for (const r of ranked) {
+            const prev = prevInflow.current.get(r.address)
+            if (prev !== undefined && r.inflow_10m > prev) bumps.set(r.address, now)
+            prevInflow.current.set(r.address, r.inflow_10m)
+          }
+          if (bumps.size) setFreshTokens((m) => new Map([...m, ...bumps]))
+          setLiveRows(ranked)
+          setLiveClock(liveRadar.current.clock)
+        }, DELTA_FLUSH_MS)
+      }
+    } else if (ev.type === 'alert') {
+      const a = ev.data as StreamAlert
+      const key = a.key ?? alertKey(a)
+      setLiveAlerts((m) => {
+        const n = new Map(m)
+        const prev = n.get(key)
+        if (a.kind === 'fired') {
+          n.set(key, { id: prev?.id ?? -ev.ts_emit, created_ts: a.created_ts ?? Math.floor(ev.ts_emit), clock_ts: a.clock_ts, mode: a.mode ?? 'live', token: a.token, symbol: a.symbol, rule: a.rule ?? '?', score: a.score ?? 0, inflow: a.inflow ?? 0, mentions_1h: a.mentions_1h ?? null, price: a.price, detail: (a.detail as AlertRow['detail']) ?? null, outcome_30m: prev?.outcome_30m ?? null, outcome_60m: prev?.outcome_60m ?? null, graduated_after: prev?.graduated_after ?? null })
+        } else if (prev) {
+          n.set(key, { ...prev, outcome_30m: a.outcome_30m ?? prev.outcome_30m, outcome_60m: a.outcome_60m ?? prev.outcome_60m, graduated_after: a.graduated_after ?? prev.graduated_after })
+        } else {
+          n.set(key, { id: -ev.ts_emit, created_ts: Math.floor(ev.ts_emit), clock_ts: a.clock_ts, mode: 'live', token: a.token, symbol: a.symbol, rule: a.rule ?? 'under_radar_top5', score: 0, inflow: 0, mentions_1h: null, price: a.price, detail: null, outcome_30m: a.outcome_30m ?? null, outcome_60m: a.outcome_60m ?? null, graduated_after: a.graduated_after ?? null })
+        }
+        return n
+      })
+      markFresh([key])
+    } else if (ev.type === 'position') {
+      const p = ev.data as StreamPosition
+      if (p.kind === 'skipped') return
+      const pos: PaperPosition = { ...(p as PaperPosition) }
+      setPaper((cur) => {
+        if (!cur) return cur
+        const open = cur.positions.open.filter((x) => x.id !== pos.id)
+        const closed = cur.positions.closed.filter((x) => x.id !== pos.id)
+        if (pos.status === 'closed') closed.unshift(pos)
+        else open.push(pos)
+        open.sort((a, b) => a.id - b.id)
+        return { ...cur, positions: { ...cur.positions, open, closed } }
+      })
+      if (p.kind !== 'mark') markFresh([`pos:${pos.id}`])
+    } else if (ev.type === 'session') {
+      const s = ev.data as StreamSession
+      if (s.lag_ms !== undefined && s.lag_ms !== null) setServerLagMs(s.lag_ms)
+    }
+  }, [markFresh])
+  const live = useLive(mode === 'live', onStream)
+  const streaming = live.status === 'live'
+  useEffect(() => {
+    // the browser's own reconnect resumed past the ring: the snapshots are refetched by the polls below on their next tick,
+    // the streamed row set starts over so a removed coin cannot linger
+    liveRadar.current.reset()
+    setLiveRows(null)
+  }, [live.gapNonce])
 
   // ---- status (coverage, live health) ----
   useEffect(() => {
@@ -237,15 +332,86 @@ export default function App() {
         .finally(() => {
           busy = false
         })
-      api.alerts().then((a) => alive && setAlerts(a)).catch(() => {})
+      api.alerts(120).then((a) => alive && setAlerts(a)).catch(() => {})
     }
     tick()
-    const id = window.setInterval(tick, 4000)
+    const id = window.setInterval(tick, streaming ? RADAR_POLL_STREAM_MS : RADAR_POLL_MS)
     return () => {
       alive = false
       window.clearInterval(id)
     }
-  }, [view, radarFilters, radarTick])
+  }, [view, radarFilters, radarTick, streaming, live.gapNonce])
+
+  // ---- SIGNALS data: the paper ledger, the track record, the engine's /api/perf (lag for the strip) ----
+  useEffect(() => {
+    if (view !== 'signals') return
+    let alive = true
+    const tick = () => {
+      api
+        .paper(200)
+        .then((p) => {
+          if (!alive) return
+          setPaper(p)
+          setPaperError(null)
+        })
+        .catch((e) => alive && setPaperError(String(e.message ?? e)))
+    }
+    tick()
+    const id = window.setInterval(tick, streaming ? PAPER_POLL_STREAM_MS : PAPER_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [view, streaming, live.gapNonce])
+  useEffect(() => {
+    if (view !== 'signals') return
+    let alive = true
+    const tick = () => api.trackRecord().then((t) => alive && setTrack(t)).catch(() => {})
+    tick()
+    const id = window.setInterval(tick, TRACK_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [view])
+  useEffect(() => {
+    if (mode !== 'live') return
+    let alive = true
+    const tick = () =>
+      api
+        .perf()
+        .then((p) => {
+          if (!alive) return
+          setEnginePerf(p)
+          const p50 = p.latency_ms?.block_to_emit?.p50
+          if (p50 !== null && p50 !== undefined) setServerLagMs(p50)
+        })
+        .catch(() => {})
+    tick()
+    const id = window.setInterval(tick, PERF_POLL_MS)
+    return () => {
+      alive = false
+      window.clearInterval(id)
+    }
+  }, [mode])
+  // alerts as one list, newest first: the journal from /api/alerts plus what the stream delivered since (fired + settled)
+  const mergedAlerts = useMemo(() => {
+    const m = new Map<string, AlertRow>()
+    for (const a of alerts?.alerts ?? []) m.set(alertKey(a), a)
+    for (const [k, a] of liveAlerts) {
+      const prev = m.get(k)
+      m.set(k, prev ? { ...prev, outcome_30m: a.outcome_30m ?? prev.outcome_30m, outcome_60m: a.outcome_60m ?? prev.outcome_60m, graduated_after: a.graduated_after ?? prev.graduated_after, detail: prev.detail ?? a.detail } : a)
+    }
+    return [...m.values()].sort((a, b) => b.clock_ts - a.clock_ts || b.id - a.id)
+  }, [alerts, liveAlerts])
+  const alertsShown = useMemo(() => (alerts ? { ...alerts, alerts: mergedAlerts } : null), [alerts, mergedAlerts])
+  // RADAR rows: from the stream while it is live (the polled response supplies total / presets / context), else polled
+  const radarShown = useMemo<RadarResponse | null>(() => {
+    if (!streaming || liveRows === null) return radarData
+    const rows = filterLiveRows(liveRows, radarFilters).slice(0, 60)
+    const base: RadarResponse = radarData ?? { clock: liveClock, window_s: session?.window_s ?? 1800, span_s: liveRadar.current.spanS, rows: [], total: rows.length, presets: {} }
+    return { ...base, rows, clock: liveClock ?? base.clock, total: Math.max(base.total, rows.length), preset: radarFilters.preset !== 'custom' ? radarFilters.preset : null }
+  }, [streaming, liveRows, liveClock, radarData, radarFilters, session?.window_s])
 
   // ---- one coin: on-chain as-of numbers plus whatever context is cached; refresh fetches live context ----
   const loadCoin = useCallback((addr: string, refresh = false) => {
@@ -379,12 +545,12 @@ export default function App() {
   // automation hook (demo recording, tests): same code path as a click
   useEffect(() => {
     ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
-    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, startView, coin: coinAddr, drawerOpen, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current, reduced, wallet: walletAddr, walletCardOpen, traderRows: traders.data?.rows.length ?? 0 })
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, startView, coin: coinAddr, drawerOpen, radarRows: radarShown?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current, reduced, wallet: walletAddr, walletCardOpen, traderRows: traders.data?.rows.length ?? 0, live: live.status, liveRows: liveRows?.length ?? null, liveDeltas: liveRadar.current.deltas, streaming, alerts: mergedAlerts.length, paperOpen: paper?.positions.open.length ?? null, paperClosed: paper?.positions.closed.length ?? null })
     ;(window as unknown as { __stampede_view?: (v: View) => void }).__stampede_view = setView
     ;(window as unknown as { __stampede_coin?: (a: string) => void }).__stampede_coin = openFlow
-  }, [select, viewState, selection, layout, renderer, graph, session, view, startView, coinAddr, drawerOpen, radarData, openFlow, autopilot, reduced, walletAddr, walletCardOpen, traders.data])
+  }, [select, viewState, selection, layout, renderer, graph, session, view, startView, coinAddr, drawerOpen, radarShown, openFlow, autopilot, reduced, walletAddr, walletCardOpen, traders.data, live.status, liveRows, streaming, mergedAlerts, paper])
 
-  // keys: 1/2/3/4 views, E evidence, Esc back, P presentation, T tape, D coin / wallet details, A autopilot, space play/pause
+  // keys: 1/2/3/4/5 views, E evidence, Esc back, P presentation, T tape, D coin / wallet details, A autopilot, space play/pause
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
@@ -395,12 +561,13 @@ export default function App() {
           else setWalletAddr(null)
         } else if (drawerOpen) setDrawerOpen(false)
         else if (view === 'flow') setView('radar')
-        else if (view === 'radar') setCoinAddr(null)
+        else if (view === 'radar' || view === 'signals') setCoinAddr(null)
         else select(null)
       } else if (e.key === '1') setView('radar')
       else if (e.key === '2') setView('flow')
       else if (e.key === '3') setView('map')
       else if (e.key === '4') setView('traders')
+      else if (e.key === '5') setView('signals')
       else if ((e.key === 'd' || e.key === 'D') && view === 'traders' && walletAddr) setWalletCardOpen(!walletCardOpen)
       else if ((e.key === 'd' || e.key === 'D') && coinAddr && view !== 'map') setDrawerOpen((v) => !v)
       else if (e.key === ' ' && session?.controls) {
@@ -449,10 +616,16 @@ export default function App() {
   const approx = edge?.sequences.some((s) => !s.sell.ts_exact || !s.buy.ts_exact) ?? false
   return (
     <div className={`app view-${view} ${presentation ? 'presentation' : 'explore'} ${mapView && !presentation ? 'has-ticker' : ''} ${reduced ? 'reduced' : ''}`}>
-      <TopStrip status={status} session={session} statusError={statusError} view={view} startView={startView} onView={setView} onHome={goHome} onControl={control} />
+      <TopStrip status={status} session={session} statusError={statusError} view={view} startView={startView} live={{ status: live.status, lagMs: serverLagMs, clientLagMs: live.clientLagMs }} onView={setView} onHome={goHome} onControl={control} />
       {view === 'radar' && (
         <main className={`main radar-main ${drawerOpen ? 'has-drawer' : ''}`}>
-          <Radar data={radarData} alerts={alerts} session={session} error={statusError} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} active={view === 'radar'} onSelect={openCoin} onMove={setCoinAddr} onFlow={openFlow} onPick={pickCoin} freshTokens={freshTokens} />
+          <Radar data={radarShown} alerts={alertsShown} session={session} error={statusError} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} active={view === 'radar'} onSelect={openCoin} onMove={setCoinAddr} onFlow={openFlow} onPick={pickCoin} freshTokens={freshTokens} streaming={streaming} />
+          {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={openCoin} />}
+        </main>
+      )}
+      {view === 'signals' && (
+        <main className={`main signals-main ${drawerOpen ? 'has-drawer' : ''}`}>
+          <Signals alerts={mergedAlerts} paper={paper} track={track} perf={enginePerf} session={session} live={live} error={paperError ?? statusError} selected={coinAddr} freshKeys={freshKeys} onSelect={openCoin} onFlow={openFlow} />
           {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={openCoin} />}
         </main>
       )}

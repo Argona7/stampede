@@ -343,7 +343,7 @@ export interface AlertRow {
   inflow: number
   mentions_1h: number | null
   price: number | null
-  detail: { rank: number; sources: RadarSource[]; accel: number; breadth: number; age_s: number | null; stage: string; mentions_known?: boolean; p_2x_30m?: number | null; size_quote?: number | null; exit_plan?: string[] | null; source?: string } | null
+  detail: { rank: number; sources: RadarSource[]; accel: number; breadth: number; age_s: number | null; stage: string; mentions_known?: boolean; p_2x_30m?: number | null; p_minus50_30m?: number | null; ev_per_trade_quote?: number | null; size_quote?: number | null; exit_plan?: string[] | null; source?: string; engine?: string; reasons?: string[] } | null
   outcome_30m: number | null
   outcome_60m: number | null
   graduated_after: number | null
@@ -353,5 +353,213 @@ export interface AlertsResponse {
   alerts: AlertRow[]
   rules: Record<string, Record<string, number>>
   track_record: { fired: number; with_outcome_30m: number; up_30m: number; median_30m: number | null; note: string }
-  worker: { running: boolean; last_cycle: number | null; last_error: string | null; cycles: number; context_enabled: boolean; alerts_fired: number }
+  worker: { running: boolean; last_cycle: number | null; last_error: string | null; cycles: number; context_enabled: boolean; alerts_fired: number; alerts_enabled?: boolean }
+}
+
+// ---- stage 7: paper ledger (simulated fills at the next block's reserves; engine/paper.py) ----
+export interface PaperFill {
+  ts: number
+  block: number
+  side: 'buy' | 'sell'
+  tokens: string
+  quote: number
+  fee: number
+  tax: number
+  snipe: number
+  px: number
+  reason: string
+  venue: string
+}
+
+export interface PaperPosition {
+  id: number
+  token: string
+  symbol: string
+  curve: string
+  quote_symbol: string | null
+  status: 'open' | 'closed'
+  alert_ts: number
+  alert_block: number
+  opened_ts: number
+  opened_block: number
+  size_quote: number
+  tokens: string
+  tokens_remaining: string
+  tokens_f: number
+  entry_px: number
+  spot_px_before: number | null
+  impact_bps: number | null
+  fee_quote: number
+  tax_quote: number
+  snipe_quote: number
+  tax_bps: number
+  tax_source: string
+  p_2x_30m: number | null
+  ev_quote: number | null
+  plan: { tp: [number, number][] | null; trail: number | null; sl: number | null; time_s: number; inflow_dies: boolean; text: string[] }
+  peak_px: number
+  peak_ret: number | null
+  tp_done: boolean
+  proceeds_quote: number
+  exit_fees_quote: number
+  mark_px: number | null
+  mark_quote: number | null
+  unrealized_quote: number | null
+  ret: number | null
+  closed_ts: number | null
+  closed_block: number | null
+  exit_reason: string | null
+  pnl_quote: number | null
+  pnl_usd: number | null
+  hold_s: number | null
+  updated_ts: number
+  fills?: PaperFill[]
+}
+
+export interface PaperStats {
+  trades: number
+  coins: number
+  wins: number
+  hit_rate: number | null
+  expectancy_quote: number | null
+  expectancy_pct: number | null
+  expectancy_usd: number | null
+  usd_known: number
+  total_quote: number
+  total_usd: number | null
+  profit_factor: number | null
+  max_drawdown_quote: number
+  avg_win_quote: number | null
+  avg_loss_quote: number | null
+  median_hold_s: number | null
+  fees_quote: number
+  size_mean_quote: number | null
+  exits: Record<string, number>
+  per_hour: { hour: string; n: number; wins: number; pnl: number }[]
+  by_hour_of_day: { hour: number; n: number; wins: number; pnl: number }[]
+  ci95_quote: [number, number] | null
+  ci_method: string
+  open: number
+  unrealized_quote: number
+  exposure_quote: number
+  skipped_by_risk: number
+  simulated: true
+  note: string
+}
+
+export interface PaperResponse {
+  positions: { open: PaperPosition[]; closed: PaperPosition[]; pending: { token: string; symbol: string; alert_ts: number; alert_block: number; size_quote: number }[] }
+  equity: { ts: number; realized_quote: number; unrealized_quote: number; equity_quote: number }[]
+  stats: PaperStats
+  config: { size_cap_quote: number; max_concurrent: number; daily_stop_frac: number; plan: Record<string, unknown>; latency: string; fx: boolean }
+  counters: Record<string, number>
+  clock: number | null
+  simulated: true
+  source: 'engine' | 'tables'
+  mode: Mode
+}
+
+export interface TrackRecordRule {
+  fired: number
+  coins: number
+  due_30m: number
+  with_outcome_30m: number
+  up_30m: number
+  ge_2x_30m: number
+  median_30m: number | null
+  mean_30m: number | null
+  due_60m: number
+  with_outcome_60m: number
+  up_60m: number
+  median_60m: number | null
+  graduated_after: number
+  engine: number
+}
+
+export interface TrackRecord {
+  generated_at: number
+  since_ts: number | null
+  engine_started_at: number | null
+  mode: Mode
+  alerts: { total: number; by_rule: Record<string, TrackRecordRule>; recent: unknown[] }
+  paper: { stats: PaperStats; open: PaperPosition[]; closed: PaperPosition[] }
+  perf: null | {
+    started_at: number | null
+    uptime_s: number | null
+    blocks_processed: number | null
+    gaps_found: number | null
+    gaps_unfilled_blocks: number | null
+    latency_p50_ms: number | null
+    latency_p95_ms: number | null
+    reconnects: number | null
+    failovers: number | null
+    stalls: number | null
+    endpoint: string | null
+    events: number | null
+    writer_max_lag_s: number | null
+  }
+  fx: { rows: number; last_hour: number | null }
+  simulated: true
+  note: string
+}
+
+export interface PerfResponse {
+  engine: string | null
+  uptime_s?: number | null
+  blocks?: { processed?: number; gaps_found?: number; gaps_unfilled_blocks?: number }
+  latency_ms: Record<string, { n: number; p50: number | null; p90?: number | null; p95: number | null; p99?: number | null; max?: number | null }>
+  events?: { last_id: number; per_s_10s?: number }
+  note?: string
+}
+
+// ---- GET /api/stream frames (docs/ENGINE.md) ----
+export type StreamType = 'block' | 'trade' | 'sequence' | 'radar_delta' | 'alert' | 'verdict' | 'position' | 'session'
+
+export interface StreamEvent<T = unknown> {
+  id: number | null
+  type: StreamType
+  ts_emit: number
+  block: number | null
+  data: T
+}
+
+export interface RadarDelta {
+  full: boolean
+  reason: 'block' | 'tick' | 'snapshot'
+  clock: number
+  window_s: number
+  span_s: number
+  rows: (RadarRow & { rank: number | null; price_spot: number | null; reserve_quote: string | null; block: number; updated_ts: number })[]
+  removed: string[]
+  top: string[]
+}
+
+export interface StreamAlert extends Partial<AlertRow> {
+  kind: 'fired' | 'outcome'
+  key: string
+  token: string
+  symbol: string
+  clock_ts: number
+  rule?: string
+  price: number | null
+  outcome_30m?: number | null
+  outcome_60m?: number | null
+  graduated_after?: number | null
+}
+
+export type StreamPosition = PaperPosition & { kind: 'opened' | 'fill' | 'mark' | 'closed' } | { kind: 'skipped'; token: string; symbol: string; clock: number; block: number; reason: string; capped_by?: string | null }
+
+export interface StreamSession extends Partial<SessionState> {
+  hello?: boolean
+  engine?: string
+  head_block?: number | null
+  last_block?: number | null
+  head_lag_s?: number | null
+  paused?: boolean
+  feed?: { endpoint: string | null; connected: boolean; reconnects: number | null; failovers: number | null; last_head_age_s: number | null; pending_blocks: number | null } | null
+  last_event_id?: number
+  replay_gap?: boolean
+  lag_ms?: number | null
+  paper?: { open: number; closed: number; pending: number; realized_quote: number } | null
+  events_per_s?: number
 }

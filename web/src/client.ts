@@ -1,5 +1,5 @@
 import type { LookupResponse, TradersResponse, WalletCardData } from './tradersTypes'
-import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Status, TokenDetail, TokenLabel } from './types'
+import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, PaperResponse, PerfResponse, RadarResponse, Status, TokenDetail, TokenLabel, TrackRecord } from './types'
 
 async function get<T>(url: string): Promise<T> {
   const r = await fetch(url)
@@ -24,7 +24,10 @@ export const api = {
   search: (text: string) => get<TokenLabel[]>(`/api/search?${q({ q: text })}`),
   radar: (p: Record<string, string | number | null | undefined>) => get<RadarResponse>(`/api/radar?${q(p)}`),
   coin: (addr: string, refresh = false) => get<CoinDetail>(`/api/coin/${addr}?${q({ refresh: refresh ? 1 : 0 })}`),
-  alerts: () => get<AlertsResponse>('/api/alerts'),
+  alerts: (limit = 100) => get<AlertsResponse>(`/api/alerts?${q({ limit })}`),
+  paper: (closedLimit = 200) => get<PaperResponse>(`/api/paper?${q({ closed_limit: closedLimit })}`),
+  trackRecord: () => get<TrackRecord>('/api/track-record?alerts_limit=0'),
+  perf: () => get<PerfResponse>('/api/perf'),
   traders: (p: Record<string, string | number | null | undefined>) => get<TradersResponse>(`/api/traders?${q(p)}`),
   wallet: (addr: string, clock: number | null = null) => get<WalletCardData>(`/api/wallet/${addr}?${q({ clock })}`),
   tradersLookup: (wallets: string[]) => get<LookupResponse>(`/api/traders/lookup?${q({ wallets: wallets.join(',') })}`),
