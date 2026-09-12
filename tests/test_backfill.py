@@ -114,3 +114,37 @@ def test_pool_row_sorts_currencies():
     pr = {"topic1": "0x" + "ab" * 32, "data": "0x" + TOKEN_B[2:].rjust(64, "0") + chain.NATIVE[2:].rjust(64, "0") + WALLET_2[2:].rjust(64, "0"), "block": 5, "tx_hash": "0xp"}
     row = backfill.pool_row(pr)
     assert row[1] == chain.NATIVE and row[2] == TOKEN_B and row[5] == chain.PONS_V2_HOOK
+
+
+def test_resilient_stream_reopens_after_a_stall(monkeypatch):
+    """A HyperSync stream that stops delivering (DNS blip, dropped connection) never raises; the wrapper times out and
+    re-opens the stream from the last next_block instead of hanging forever."""
+    monkeypatch.setattr(backfill, "RECV_TIMEOUT_S", 0.05)
+    opened = []
+
+    real_sleep = asyncio.sleep
+
+    class StallRx:
+        async def recv(self):
+            await real_sleep(10)
+
+    class Client:
+        async def stream(self, query, config):
+            opened.append(query.from_block)
+            if len(opened) == 1:
+                return StallRx()
+            return FakeRx([NS(next_block=1201, data=NS(logs=[], blocks=[], transactions=[])), NS(next_block=1301, data=NS(logs=[], blocks=[], transactions=[]))])
+
+    async def collect():
+        out = []
+        async for res in backfill.resilient_stream(lambda: Client(), lambda a, b: NS(from_block=a, to_block=b + 1), 1000, 1300, FakeHS, 2, progress=lambda m: None):
+            out.append(int(res.next_block))
+        return out
+
+    monkeypatch.setattr(asyncio, "sleep", lambda s: _fast_sleep(s))
+    assert asyncio.run(collect()) == [1201, 1301]
+    assert opened == [1000, 1000]  # re-opened from the same cursor because nothing had been delivered yet
+
+
+async def _fast_sleep(_s):
+    return None

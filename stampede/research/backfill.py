@@ -110,10 +110,41 @@ def apply_lifecycle(store: Store, logs: list[dict[str, Any]]) -> Counter:
     return c
 
 
+RECV_TIMEOUT_S = 120.0  # a stalled HyperSync stream (DNS blip, dropped connection) never raises: recv() would wait forever
+MAX_STREAM_RETRIES = 50
+
+
+async def resilient_stream(client_factory, make_query, fr: int, to: int, hs_module: Any, concurrency: int, progress=print):
+    """Yield QueryResponses for [fr, to]; on a stalled or failed stream, re-open it from the last `next_block`."""
+    nb = fr
+    retries = 0
+    client = client_factory()
+    while nb <= to:
+        try:
+            rx = await client.stream(make_query(nb, to), hs_module.StreamConfig(concurrency=concurrency))
+            while True:
+                res = await asyncio.wait_for(rx.recv(), timeout=RECV_TIMEOUT_S)
+                if res is None:
+                    return
+                nb = int(res.next_block)
+                retries = 0
+                yield res
+            # unreachable
+        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001 - the Rust client raises plain Exceptions
+            retries += 1
+            if retries > MAX_STREAM_RETRIES:
+                raise
+            wait = min(60.0, 2.0 * retries)
+            progress(f"stream stalled/failed at block {nb:,} ({type(e).__name__}: {str(e)[:120]}); reopening in {wait:.0f}s (retry {retries})")
+            await asyncio.sleep(wait)
+            client = client_factory()
+
+
 class Backfill:
-    def __init__(self, store: Store, client: Any, hs_module: Any, progress=print):
+    def __init__(self, store: Store, client: Any, hs_module: Any, progress=print, client_factory=None):
         self.store = store
         self.client = client
+        self.client_factory = client_factory or (lambda: client)
         self.hs = hs_module
         self.progress = progress
         self.stats: Counter = Counter()
@@ -157,12 +188,8 @@ class Backfill:
     async def lifecycle(self, fr: int, to: int) -> Counter:
         hs = self.hs
         t0 = time.time()
-        rx = await self.client.stream(self.lifecycle_query(fr, to), hs.StreamConfig(concurrency=4))
         total: Counter = Counter()
-        while True:
-            res = await rx.recv()
-            if res is None:
-                break
+        async for res in resilient_stream(self.client_factory, lambda a, b: self.lifecycle_query(a, b), fr, to, hs, 4, self.progress):
             logs = [log_dict(l) for l in res.data.logs]
             blocks = [(int(b.number), _hex_int(b.timestamp), 1) for b in res.data.blocks if b.number is not None]
             self.store.upsert_blocks(blocks)
@@ -179,14 +206,10 @@ class Backfill:
         ctx = ctx or build_context(self.store)
         pool_ids = sorted(ctx.pool_token)
         t0 = time.time()
-        rx = await self.client.stream(self.trades_query(fr, to, pool_ids), hs.StreamConfig(concurrency=6))
         total: Counter = Counter()
         n_resp = 0
         wallets: Counter = Counter()
-        while True:
-            res = await rx.recv()
-            if res is None:
-                break
+        async for res in resilient_stream(self.client_factory, lambda a, b: self.trades_query(a, b, pool_ids), fr, to, hs, 4, self.progress):
             n_resp += 1
             ts_by_block = {int(b.number): _hex_int(b.timestamp) for b in res.data.blocks if b.number is not None}
             logs = [log_dict(l) for l in res.data.logs]
@@ -244,7 +267,7 @@ def make_client(hs_module: Any, token: str | None = None) -> Any:
 
 async def run(store: Store, fr: int, to: int, hs_module: Any, resume: bool = True, progress=print) -> dict[str, Any]:
     client = make_client(hs_module)
-    bf = Backfill(store, client, hs_module, progress=progress)
+    bf = Backfill(store, client, hs_module, progress=progress, client_factory=lambda: make_client(hs_module))
     out: dict[str, Any] = {"from_block": fr, "to_block": to}
     lc = store.get_meta("backfill_lifecycle_cursor")
     lifecycle_from = max(0, fr - int(LIFECYCLE_LOOKBACK_DAYS * 86400 * BLOCKS_PER_SECOND))
