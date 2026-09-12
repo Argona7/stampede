@@ -349,6 +349,67 @@ def test_perf_endpoint_shape(tmp_path):
         assert set(v) >= {"n", "p50", "p90", "p95", "p99", "max"}, k
 
 
+def test_feed_fails_over_to_the_second_endpoint_and_reconnects(monkeypatch):
+    """The first endpoint refuses, the second accepts the subscriptions and streams two heads before closing:
+    blocks come out in order, the failover and the reconnect are counted (no network: `connect` is faked)."""
+    import asyncio
+    import websockets.asyncio.client as wsc
+
+    class FakeWS:
+        latency = 0.05
+
+        def __init__(self, role_frames):
+            self.pending: list[dict] = []
+            self.frames = list(role_frames)
+
+        async def send(self, msg):
+            self.pending.append(json.loads(msg))
+
+        async def recv(self):
+            if self.pending:
+                req = self.pending.pop(0)
+                return json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": f"0xsub{req['id']}"})
+            if self.frames:
+                await asyncio.sleep(0.01)
+                return json.dumps(self.frames.pop(0))
+            await asyncio.sleep(0.05)
+            raise ConnectionError("closed by the fake node")
+
+    heads = [{"jsonrpc": "2.0", "method": "eth_subscription", "params": {"subscription": "0xsub1", "result": head(n, bloom=ZERO_BLOOM)}} for n in (100, 101)]
+    attempts: list[str] = []
+
+    class FakeConnect:
+        def __init__(self, url, **kw):
+            self.url = url
+
+        async def __aenter__(self):
+            attempts.append(self.url)
+            if self.url == "wss://a":
+                raise OSError("connection refused")
+            return FakeWS(heads if len([u for u in attempts if u == "wss://b"]) == 1 else [])  # first fast connect streams; later ones idle
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(wsc, "connect", FakeConnect)
+    out: queue.Queue = queue.Queue()
+    f = feed_mod.Feed(out, BlockAssembler(bloom=PonsBloom()), None, endpoints=["wss://a", "wss://b"], stable_after_s=30)
+    f.start()
+    got = []
+    deadline = time.time() + 6
+    while time.time() < deadline and len(got) < 2:
+        try:
+            got.append(out.get(timeout=0.5))
+        except queue.Empty:
+            pass
+    f.stop()
+    assert [b.number for b in got] == [100, 101] and all("bloom_skip" in b.flags for b in got)
+    snap = f.snapshot()
+    fast = snap["connections"]["fast"]
+    assert attempts[0] == "wss://a" and "wss://b" in attempts and fast["failovers"] >= 1 and fast["errors"] >= 1 and fast["connects"] >= 1
+    assert snap["reconnects"] >= 0 and f.first_head == 100 and snap["head_gap_ms"]["n"] == 1
+
+
 def test_feed_constants_and_parse_log_filters():
     assert set(feed_mod.FAST_SUBSCRIPTIONS) == {"heads", "curve", "swap", "factory", "hook"} and set(feed_mod.BULK_SUBSCRIPTIONS) == {"transfer"}
     assert feed_mod.FAST_SUBSCRIPTIONS["swap"][1]["address"] == chain.V4_POOL_MANAGER and feed_mod.FAST_SUBSCRIPTIONS["factory"][1]["address"] == chain.PONS_V2_FACTORY
