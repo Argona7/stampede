@@ -150,7 +150,7 @@ def build(store: Store, since_ts: int | None = None, perf: dict[str, Any] | None
 
 
 # ---- markdown -----------------------------------------------------------------------------------------------------------
-def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None) -> str:
+def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None, api_url: str | None = None) -> str:
     a = tr["alerts"]
     p = tr["paper"]
     st = p["stats"]
@@ -273,8 +273,8 @@ def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None) -
     L.append("## Regenerate")
     L.append("")
     L.append("```sh")
-    L.append("uv run stampede track-record --db data/live-engine.sqlite --out docs/TRACK-RECORD.md --api http://127.0.0.1:8812   # --api: the running engine's /api/perf; omit when it is down")
-    L.append("uv run stampede fx --db data/live-engine.sqlite --days 4   # optional: hourly ETH/USD so the USD columns are known")
+    L.append(f"uv run stampede track-record --db {tr['db']} --out docs/TRACK-RECORD.md --api {api_url or 'http://127.0.0.1:PORT'}" + (f" --since {since}" if since else "") + "   # --api: the running engine's /api/perf; omit when it is down")
+    L.append(f"uv run stampede fx --db {tr['db']} --days 4   # optional: hourly ETH/USD so the USD columns are known")
     L.append("```")
     L.append("")
     return "\n".join(L)
@@ -299,7 +299,7 @@ def main_track_record(args) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"/api/perf not reachable at {args.api}: {type(e).__name__}: {str(e)[:120]} (report written without the run section)", flush=True)
     tr = build(store, since_ts=getattr(args, "since", None), perf=perf, mode=getattr(args, "mode", None) or "live")
-    md = render_markdown(tr, perf_snapshot_path=snap_path)
+    md = render_markdown(tr, perf_snapshot_path=snap_path, api_url=getattr(args, "api", None))
     if args.out:
         Path(args.out).write_text(md)
         print(f"wrote {args.out}: {tr['alerts']['total']} alerts, {tr['paper']['stats']['trades']} closed paper trades, {tr['paper']['stats']['open']} open" + (f", uptime {tr['perf']['uptime_s']} s" if tr.get("perf") else ""), flush=True)
