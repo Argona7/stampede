@@ -74,3 +74,9 @@ class ApiClient:
 
     def alerts(self) -> dict[str, Any]:
         return self._get("/api/alerts")
+
+    def traders(self, params: dict[str, Any]) -> dict[str, Any]:
+        return self._get("/api/traders", params)
+
+    def wallet(self, addr: str) -> dict[str, Any]:
+        return self._get(f"/api/wallet/{addr}")

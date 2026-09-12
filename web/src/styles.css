@@ -1795,3 +1795,296 @@ hr {
   animation: none !important;
   transition: none !important;
 }
+
+/* ---- TRADERS (stage 2): wallet leaderboard, smart-money strip, wallet card. Same dense table as RADAR
+   (.radar-table / .radar-row are reused for the discipline: sticky header, tabular figures, held ordering). ---- */
+.traders-main {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.traders-main.has-drawer {
+  grid-template-columns: minmax(0, 1fr) 440px;
+}
+
+.traders {
+  height: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: var(--bar-h) auto auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.traders-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.smart-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  height: 30px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.smart-strip .h {
+  color: var(--secondary);
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  flex: none;
+}
+
+.smart-strip .faint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.smart-item {
+  height: 22px;
+  padding: 0 8px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--secondary);
+  border-color: var(--border);
+  flex: none;
+}
+
+.smart-item .t,
+.smart-item .from {
+  color: var(--muted);
+}
+
+.smart-item .q {
+  color: var(--text);
+}
+
+.smart-item .arrow {
+  color: var(--primary);
+}
+
+.smart-item b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.traders-table .c-coin .tag,
+.wallet-card .tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  color: var(--secondary);
+  font-size: 10px;
+  line-height: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+
+.traders-table .tag.bot,
+.traders-table .tag.deployer,
+.traders-table .tag.snipe_exempt,
+.wallet-card .tag.bot,
+.wallet-card .tag.deployer,
+.wallet-card .tag.snipe_exempt {
+  color: var(--text);
+  border-color: var(--secondary);
+}
+
+.traders-table .t-pnl b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.traders-table .t-pnl .sub {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+.traders-table td.t-pnl {
+  line-height: 1.1;
+}
+
+.traders-table .t-quality b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* columns leave in order of importance as the table gets narrower (card open, small window) */
+@container (max-width: 1180px) {
+  .traders-table .t-last,
+  .traders-table .t-coins {
+    display: none;
+  }
+}
+
+@container (max-width: 980px) {
+  .traders-table .t-sniper,
+  .traders-table .t-rug {
+    display: none;
+  }
+}
+
+@container (max-width: 800px) {
+  .traders-table .t-exit,
+  .traders-table .t-hold {
+    display: none;
+  }
+}
+
+.wallet-card .tags {
+  margin: 8px 0 0;
+}
+
+.wallet-card .tags .tag {
+  margin: 0 6px 0 0;
+}
+
+.wallet-card .kv .neg,
+.positions li.neg .pnl,
+.traders-table .neg {
+  color: var(--secondary);
+}
+
+.positions {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.positions li {
+  padding: 5px 0 4px;
+  border-top: 1px solid var(--border);
+}
+
+.positions .line {
+  display: grid;
+  grid-template-columns: 62px minmax(60px, auto) minmax(80px, 1fr) auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  font-size: 11px;
+}
+
+.positions .t,
+.wtrades .t {
+  color: var(--muted);
+}
+
+.positions .coin,
+.wtrades .coin,
+.coin-chip {
+  height: 18px;
+  padding: 0 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.positions .pnl {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.positions .meta {
+  grid-column: 1 / -2;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.positions .tx {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 6px;
+  color: var(--secondary);
+}
+
+.positions .bar {
+  position: relative;
+  height: 3px;
+  margin-top: 4px;
+  background: var(--surface);
+}
+
+.positions .bar span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--secondary);
+}
+
+.positions li.open .bar span {
+  background: var(--primary);
+}
+
+.positions li.neg .bar span {
+  background: var(--muted);
+}
+
+.coins {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coin-chip b {
+  color: var(--secondary);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+.wtrades {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 11px;
+}
+
+.wtrades li {
+  display: grid;
+  grid-template-columns: 62px 34px minmax(60px, auto) minmax(90px, 1fr) auto auto;
+  gap: 0 8px;
+  align-items: center;
+  padding: 3px 0;
+  border-top: 1px solid var(--border);
+}
+
+.wtrades .side {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  color: var(--secondary);
+}
+
+.wtrades .side.buy {
+  color: var(--text);
+}
+
+.wtrades .amt {
+  color: var(--text);
+}
+
+.wtrades .fee {
+  white-space: nowrap;
+}

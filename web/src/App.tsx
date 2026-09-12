@@ -6,6 +6,9 @@ import Flow from './components/Flow'
 import MapBar from './components/MapBar'
 import MapHud from './components/MapHud'
 import Radar from './components/Radar'
+import Traders from './components/Traders'
+import WalletCard from './components/WalletCard'
+import { useTraders } from './useTraders'
 import { DEFAULT_RADAR, type RadarFilters } from './radarFilters'
 import Controls, { type Filters } from './components/Controls'
 import Details, { SequenceRow } from './components/Details'
@@ -24,7 +27,7 @@ const STATUS_POLL_MS = 5000
 const TOUR_MS = 7000
 
 const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
-const asView = (v: string | null): View => (v === 'flow' || v === 'map' ? v : 'radar')
+const asView = (v: string | null): View => (v === 'flow' || v === 'map' || v === 'traders' ? v : 'radar')
 
 export default function App() {
   const params = new URLSearchParams(window.location.search)
@@ -275,6 +278,9 @@ export default function App() {
     setView('flow')
   }, [])
   const presentation = layout === 'presentation'
+  // ---- traders (stage 2): leaderboard, wallet card, smart-money lookup for the live feed ----
+  const traders = useTraders(view === 'traders', session, feed, params.get('wallet'))
+  const { walletAddr, cardOpen: walletCardOpen, setCardOpen: setWalletCardOpen, setWalletAddr } = traders
 
   // ---- autopilot: in MAP presentation, tour the top radar coins (fly -> caption -> next); any manual
   // interaction stops it. Every stop is a real edge with its computed count, in the order the radar ranks them.
@@ -373,24 +379,29 @@ export default function App() {
   // automation hook (demo recording, tests): same code path as a click
   useEffect(() => {
     ;(window as unknown as { __stampede_select?: (s: Selection) => void }).__stampede_select = select
-    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, startView, coin: coinAddr, drawerOpen, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current, reduced })
+    ;(window as unknown as { __stampede_state?: () => unknown }).__stampede_state = () => ({ viewState, selection, layout, renderer, view, startView, coin: coinAddr, drawerOpen, radarRows: radarData?.rows.length ?? 0, edges: graph?.edges.length, sessionClock: session?.clock_ts, playing: session?.playing, autopilot, tourIdx: tourIdx.current, reduced, wallet: walletAddr, walletCardOpen, traderRows: traders.data?.rows.length ?? 0 })
     ;(window as unknown as { __stampede_view?: (v: View) => void }).__stampede_view = setView
     ;(window as unknown as { __stampede_coin?: (a: string) => void }).__stampede_coin = openFlow
-  }, [select, viewState, selection, layout, renderer, graph, session, view, startView, coinAddr, drawerOpen, radarData, openFlow, autopilot, reduced])
+  }, [select, viewState, selection, layout, renderer, graph, session, view, startView, coinAddr, drawerOpen, radarData, openFlow, autopilot, reduced, walletAddr, walletCardOpen, traders.data])
 
-  // keys: 1/2/3 views, E evidence, Esc back, P presentation, T tape, D coin details, A autopilot, space play/pause
+  // keys: 1/2/3/4 views, E evidence, Esc back, P presentation, T tape, D coin / wallet details, A autopilot, space play/pause
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
       if (e.key === 'Escape') {
-        if (drawerOpen) setDrawerOpen(false)
+        if (view === 'traders') {
+          if (walletCardOpen) setWalletCardOpen(false)
+          else setWalletAddr(null)
+        } else if (drawerOpen) setDrawerOpen(false)
         else if (view === 'flow') setView('radar')
         else if (view === 'radar') setCoinAddr(null)
         else select(null)
       } else if (e.key === '1') setView('radar')
       else if (e.key === '2') setView('flow')
       else if (e.key === '3') setView('map')
+      else if (e.key === '4') setView('traders')
+      else if ((e.key === 'd' || e.key === 'D') && view === 'traders' && walletAddr) setWalletCardOpen(!walletCardOpen)
       else if ((e.key === 'd' || e.key === 'D') && coinAddr && view !== 'map') setDrawerOpen((v) => !v)
       else if (e.key === ' ' && session?.controls) {
         e.preventDefault()
@@ -404,7 +415,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [select, control, session?.controls, drawerOpen, coinAddr, view, presentation])
+  }, [select, control, session?.controls, drawerOpen, coinAddr, view, presentation, walletCardOpen, walletAddr, setWalletCardOpen, setWalletAddr])
 
   const recent: Recent[] = useMemo(
     () =>
@@ -443,6 +454,12 @@ export default function App() {
         <main className={`main radar-main ${drawerOpen ? 'has-drawer' : ''}`}>
           <Radar data={radarData} alerts={alerts} session={session} error={statusError} filters={radarFilters} setFilters={setRadarFilters} selected={coinAddr} active={view === 'radar'} onSelect={openCoin} onMove={setCoinAddr} onFlow={openFlow} onPick={pickCoin} freshTokens={freshTokens} />
           {drawerOpen && <CoinDrawer coin={coin} loading={coinLoading} error={coinError} session={session} onClose={() => setDrawerOpen(false)} onRefresh={() => coinAddr && loadCoin(coinAddr, true)} onFlow={openFlow} onFocus={openCoin} />}
+        </main>
+      )}
+      {view === 'traders' && (
+        <main className={`main traders-main ${traders.cardOpen && traders.walletAddr ? 'has-drawer' : ''}`}>
+          <Traders data={traders.data} error={traders.error} session={session} filters={traders.filters} setFilters={traders.setFilters} selected={traders.walletAddr} active={view === 'traders'} onSelect={traders.openWallet} onMove={traders.setWalletAddr} feed={feed} smart={traders.smart} smartRun={traders.smartRun} />
+          {traders.cardOpen && traders.walletAddr && <WalletCard card={traders.wallet} loading={traders.walletLoading} error={traders.walletError} session={session} onClose={() => traders.setCardOpen(false)} onCoin={openFlow} />}
         </main>
       )}
       {view === 'flow' && (

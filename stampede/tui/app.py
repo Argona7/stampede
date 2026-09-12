@@ -6,7 +6,7 @@ Everything shown is read from the API (shared session clock, event stream with c
 radar); nothing is simulated.
 
 Composition (top to bottom): brand block (mascot · wordmark or compact line · mode/clock facts · view tabs),
-the active table (FEED or RADAR) with the details of the selected object in the adjacent pane, hot
+the active table (FEED, RADAR or TRADERS) with the details of the selected object in the adjacent pane, hot
 rotations + activity sparkline, one line of shortcuts. Header variants by width: >= 160 columns (and >= 30
 rows) get the README bison as 25x12 half-blocks with the block wordmark bottom-aligned to it (13 rows);
 narrower or shorter windows get a three-line header: compact wordmark + mode + chain, one status line, tabs.
@@ -120,6 +120,8 @@ class StampedeTUI(App):
     #feed {{ height: 1fr; background: {BG}; }}
     #radar {{ height: 1fr; background: {BG}; display: none; }}
     #radar.visible {{ display: block; }}
+    #traders {{ height: 1fr; background: {BG}; display: none; }}
+    #traders.visible {{ display: block; }}
     #feed.hidden {{ display: none; }}
     #empty {{ height: auto; color: {SECONDARY}; padding: 1 2; display: none; }}
     #empty.visible {{ display: block; }}
@@ -166,6 +168,11 @@ class StampedeTUI(App):
         Binding("shift+tab", "cycle_pane(-1)", "previous pane", priority=True),
         Binding("1", "screen('feed')", "feed"),
         Binding("2", "screen('radar')", "radar"),
+        Binding("3", "screen('traders')", "traders"),
+        Binding("t", "tpreset('top')", "top traders"),
+        Binding("m", "tpreset('smart')", "smart traders"),
+        Binding("n", "tpreset('snipers')", "snipers"),
+        Binding("b", "tpreset('bots')", "bots"),
         Binding("u", "preset('under_radar')", "under radar"),
         Binding("g", "preset('graduating')", "graduating"),
         Binding("s", "preset('smart_rotators')", "smart rotators"),
@@ -209,6 +216,12 @@ class StampedeTUI(App):
         self._radar_cells: dict[str, list[str]] = {}  # address -> plain cell values currently shown
         self.coin_doc: dict[str, Any] | None = None
         self.coin_addr: str | None = None
+        self.traders_preset = "top"  # top | smart | snipers | bots
+        self.traders_doc: dict[str, Any] | None = None
+        self.traders_rows: list[dict[str, Any]] = []
+        self._traders_cells: dict[str, list[str]] = {}
+        self.wallet_doc: dict[str, Any] | None = None
+        self.wallet_addr: str | None = None
         self._stream_queue: list[dict[str, Any]] = []  # history rows still to be added (streamed in over STREAM_S)
         self._stream_total = 0
         self._stream_done = 0
@@ -229,6 +242,7 @@ class StampedeTUI(App):
                 yield Static(id="empty")
                 yield DataTable(id="feed", cursor_type="row", zebra_stripes=False, show_row_labels=False)
                 yield DataTable(id="radar", cursor_type="row", zebra_stripes=False, show_row_labels=False)
+                yield DataTable(id="traders", cursor_type="row", zebra_stripes=False, show_row_labels=False)
             with Vertical(id="detailwrap"):
                 yield Static(id="detailhead")
                 yield VerticalScroll(Static(id="detailbody"), id="detail")
@@ -246,8 +260,10 @@ class StampedeTUI(App):
         self._apply_size()
         self._setup_columns(self.query_one("#feed", DataTable))
         self._setup_radar_columns(self.query_one("#radar", DataTable))
+        self._setup_traders_columns(self.query_one("#traders", DataTable))
         self.query_one("#feed", DataTable).focus()
         self.set_interval(5.0, self.radar_tick)
+        self.set_interval(6.0, self.traders_tick)
         self.render_brand()
         self.render_status()
         self.render_feedhead()
@@ -337,6 +353,23 @@ class StampedeTUI(App):
         for label, key, w in self._radar_columns():
             table.add_column(label, key=key, width=w)
 
+    def _traders_columns(self) -> list[tuple[str, str, int]]:
+        """Leaderboard columns; wide windows add tags and the last-trade time. Numbers are right-justified."""
+        wide = self._wide()
+        if wide:
+            head = [("#", "rank", 3), ("WALLET", "wallet", 11), ("TRADES", "trades", 6), ("COINS", "coins", 5), ("WIN", "win", 5), ("PNL ETH", "pnl", 9), ("ROI", "roi", 6), ("HOLD", "hold", 7), ("QUAL", "quality", 5), ("LAST UTC", "last", 8)]
+        else:
+            head = [("#", "rank", 3), ("WALLET", "wallet", 11), ("TRADES", "trades", 6), ("WIN", "win", 5), ("PNL ETH", "pnl", 9), ("ROI", "roi", 6), ("QUAL", "quality", 5)]
+        ncols = len(head) + 1
+        inner = self._feed_pane_width() - 2
+        used = sum(w for _, _, w in head) + 2 * ncols
+        tags_w = max(8, min(28, inner - used))
+        return head + [("TAGS", "tags", tags_w)]
+
+    def _setup_traders_columns(self, table: DataTable) -> None:
+        for label, key, w in self._traders_columns():
+            table.add_column(label, key=key, width=w)
+
     def on_resize(self, event: events.Resize) -> None:
         # our handler runs before App._on_resize stores the new size: finish on the next loop iteration
         self.call_later(self._after_resize)
@@ -364,6 +397,12 @@ class StampedeTUI(App):
             self._radar_cells.clear()
             rows, self.radar_rows = self.radar_rows, []
             self._fill_radar(rows)
+            tt = self.query_one("#traders", DataTable)
+            tt.clear(columns=True)
+            self._setup_traders_columns(tt)
+            self._traders_cells.clear()
+            trows, self.traders_rows = self.traders_rows, []
+            self._fill_traders(trows)
 
     # ---- polling (thread worker -> main thread) ----
     def poll_tick(self) -> None:
@@ -690,20 +729,238 @@ class StampedeTUI(App):
         except Exception:  # noqa: BLE001
             return None
 
+    # ---- traders screen ----
+    def traders_tick(self) -> None:
+        if self.screen_mode == "traders":
+            self.fetch_traders()
+
+    @work(thread=True, exclusive=True, group="traders")
+    def fetch_traders(self) -> None:
+        try:
+            doc = self.client.traders({"preset": self.traders_preset, "limit": 40, "min_trades": 5 if self.traders_preset == "smart" else 1})
+            self._deliver(self._traders_loaded, doc)
+        except ApiError as e:
+            self._deliver(self.apply_error, str(e))
+
+    def _traders_loaded(self, doc: dict[str, Any]) -> None:
+        self.traders_doc = doc
+        self._fill_traders(doc.get("rows", []))
+        self.render_feedhead()
+        if self.screen_mode == "traders" and self.detail_mode == "summary":
+            self.render_detail()
+
+    def _traders_cell_values(self, i: int, r: dict[str, Any]) -> dict[str, tuple[str, str]]:
+        """key -> (plain value, style) for one leaderboard row; unknown = n/a, never 0."""
+        pnl = r.get("pnl_eth")
+        roi = r.get("roi")
+        win = r.get("win_rate")
+        tags = ", ".join(r.get("tags") or []) or "—"
+        tags_w = next((w for _, k, w in self._traders_columns() if k == "tags"), 14)
+        return {
+            "rank": (str(i), MUTED),
+            "wallet": (short(r["wallet"]), f"bold {TEXT}"),
+            "trades": (str(r.get("trades", "")), SECONDARY),
+            "coins": (str(r.get("coins", "")), SECONDARY),
+            "win": ("n/a" if win is None else f"{win * 100:.0f}%", MUTED if win is None else TEXT),
+            "pnl": ("n/a" if pnl is None else f"{pnl:+.4f}", TEXT if (pnl or 0) >= 0 else SECONDARY),
+            "roi": ("n/a" if roi is None else f"{roi * 100:+.0f}%", MUTED if roi is None else SECONDARY),
+            "hold": (dur(int(r["median_hold_s"])) if r.get("median_hold_s") is not None else "n/a", SECONDARY if r.get("median_hold_s") is not None else MUTED),
+            "quality": (f"{r['quality']:.2f}" if r.get("quality") is not None else "n/a", f"bold {TEXT}" if (r.get("quality") or 0) >= 0.55 else SECONDARY),
+            "last": (utc(r.get("last_ts")), SECONDARY),
+            "tags": (tags[:tags_w], PRIMARY if "bot" in (r.get("tags") or []) or "deployer" in (r.get("tags") or []) else MUTED),
+        }
+
+    def _fill_traders(self, rows: list[dict[str, Any]]) -> None:
+        table = self.query_one("#traders", DataTable)
+        cols = self._traders_columns()
+        same_order = [r["wallet"] for r in rows] == [r["wallet"] for r in self.traders_rows] and table.row_count == len(rows)
+        cur = self._selected_trader_row()
+        cur_w = cur["wallet"] if cur else None
+        self.traders_rows = rows
+        left = ("wallet", "tags")
+        if same_order:
+            for i, r in enumerate(rows, 1):
+                vals = self._traders_cell_values(i, r)
+                shown = self._traders_cells.get(r["wallet"], [])
+                new_plain = []
+                for ci, (_, key, w) in enumerate(cols):
+                    plain, style = vals[key]
+                    new_plain.append(plain + "|" + style)
+                    if ci < len(shown) and shown[ci] == new_plain[-1]:
+                        continue
+                    table.update_cell(r["wallet"], key, Text(plain, style=style, justify="left" if key in left else "right"), update_width=False)
+                self._traders_cells[r["wallet"]] = new_plain
+            return
+        scroll_y = table.scroll_y
+        table.clear()
+        self._traders_cells.clear()
+        for i, r in enumerate(rows, 1):
+            vals = self._traders_cell_values(i, r)
+            cells, plain_row = [], []
+            for _, key, w in cols:
+                plain, style = vals[key]
+                plain_row.append(plain + "|" + style)
+                cells.append(Text(plain, style=style, justify="left" if key in left else "right"))
+            table.add_row(*cells, key=r["wallet"])
+            self._traders_cells[r["wallet"]] = plain_row
+        if rows:
+            idx = next((i for i, r in enumerate(rows) if r["wallet"] == cur_w), 0)
+
+            def _restore() -> None:
+                try:
+                    table.scroll_y = scroll_y
+                    table.move_cursor(row=idx, scroll=True)
+                except NoMatches:
+                    pass
+
+            self.call_after_refresh(_restore)
+
+    def _selected_trader_row(self) -> dict[str, Any] | None:
+        table = self.query_one("#traders", DataTable)
+        if table.row_count == 0:
+            return None
+        try:
+            row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
+            return next((r for r in self.traders_rows if r["wallet"] == row_key.value), None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def action_tpreset(self, name: str) -> None:
+        if self.query_one("#search", Input).has_focus:
+            return
+        self.traders_preset = name
+        if self.screen_mode != "traders":
+            self.action_screen("traders")
+        else:
+            self.fetch_traders()
+
+    @work(thread=True, exclusive=True, group="wallet")
+    def load_wallet(self, addr: str) -> None:
+        try:
+            doc = self.client.wallet(addr)
+            self._deliver(self._wallet_loaded, doc)
+        except ApiError as e:
+            self._deliver(self.apply_error, str(e))
+
+    def _wallet_loaded(self, doc: dict[str, Any]) -> None:
+        self.wallet_doc = doc
+        self.detail_mode = "wallet"
+        self.render_detail()
+        self.render_keys()
+
+    def render_wallet(self, t: Text) -> None:
+        """The wallet card: stats, tags, positions timeline, coins, recent trades with tx hashes, copy-test note."""
+        d = self.wallet_doc or {}
+        st = d.get("stats")
+        t.append(f"{d.get('short', short(self.wallet_addr or ''))}\n", style=f"bold {TEXT}")
+        t.append(f"{d.get('address', self.wallet_addr or '')}\n", style=MUTED)
+        narrow = self._narrow()
+        if not st:
+            t.append("\nno wallet_stats for this address in the computed range · run stampede traders on this store\n", style=SECONDARY)
+        else:
+            tags = ", ".join(st.get("tags") or []) or "no tags"
+            t.append(f"{tags}\n\n", style=PRIMARY if ("bot" in st.get("tags", []) or "deployer" in st.get("tags", [])) else SECONDARY)
+
+            def fact(label: str, value: str, style: str = TEXT) -> None:
+                t.append(f"{label:<9}", style=SECONDARY)
+                t.append(value + "\n", style=style)
+
+            pnl_usd = f" · ${st['pnl_usd']:,.0f}" if st.get("pnl_usd") is not None else " · USD n/a"
+            fact("PNL", f"{st['pnl_eth']:+.4f} ETH (real {st['realized_eth']:+.4f} · unreal {st['unrealized_eth']:+.4f}){pnl_usd}")
+            fact("ROI", f"{st['roi'] * 100:+.0f}% on {st['cost_eth']:.3f} ETH deployed · fees {st['fees_eth']:.4f} ETH" if st.get("roi") is not None else "n/a", SECONDARY)
+            wr = f"{st['win_rate'] * 100:.0f}%" if st.get("win_rate") is not None else "n/a"
+            fact("TRADES", f"{st['trades']} trades · {st['coins']} coins · {st['positions_closed']} closed · {st['positions_open']} open · win {wr}", SECONDARY)
+            fact("HOLD", f"median {dur(int(st['median_hold_s'])) if st.get('median_hold_s') is not None else 'n/a'} · {st['trades_per_hour']:.1f} trades/h", SECONDARY)
+            eq = f"{st['exit_quality']:.2f}" if st.get("exit_quality") is not None else "n/a"
+            ra = f"{st['rug_avoid'] * 100:.0f}%" if st.get("rug_avoid") is not None else "n/a"
+            sn = f"{st['sniper_share'] * 100:.0f}%" if st.get("sniper_share") is not None else "n/a"
+            br = f"{st['buyer_rank_median']:.0f}" if st.get("buyer_rank_median") is not None else "n/a"
+            fact("ENTRY", f"median buyer rank {br} · sniper {sn}", SECONDARY)
+            fact("EXIT", f"exit quality {eq} · rug avoided {ra} · consistency {f'{st['consistency'] * 100:.0f}%' if st.get('consistency') is not None else 'n/a'}", SECONDARY)
+            fact("QUALITY", f"{st['quality']:.3f}", f"bold {TEXT}")
+        pos = d.get("positions") or []
+        t.append(f"\nPOSITIONS · {len(pos)} in range · newest first\n", style=SECONDARY)
+        for p in pos[: 8 if narrow else 14]:
+            pnl = p.get("pnl_quote") if p.get("closed") else p.get("unrealized_quote")
+            pnl_s = f"{pnl:+.4f}" if pnl is not None else "n/a"
+            mark = "closed" if p.get("closed") else "open"
+            line = f"  {utc(p['entry_ts'])} {fit(p['token']['symbol'], 12):<12} {pnl_s:>9} {p.get('quote_symbol') or ''} {mark}"
+            if not narrow:
+                line += f" · hold {dur(p['hold_s']) if p.get('hold_s') is not None else 'n/a'} · rank {p['buyer_rank'] if p.get('buyer_rank') else 'n/a'} · exit q {f'{p['exit_quality']:.2f}' if p.get('exit_quality') is not None else 'n/a'}"
+            t.append(line + "\n", style=TEXT if (pnl or 0) >= 0 else SECONDARY)
+        if not pos:
+            t.append("  none\n", style=MUTED)
+        coins = d.get("coins") or []
+        t.append(f"\nCOINS · {len(coins)}\n", style=SECONDARY)
+        t.append("  " + " · ".join(f"{fit(c['symbol'], 12)} {c['trades']}" for c in coins[:10]) + ("\n" if coins else "none\n"), style=TEXT)
+        tr = d.get("trades") or []
+        t.append(f"\nRECENT TRADES · {len(tr)} of {d.get('trades_total', len(tr))}\n", style=SECONDARY)
+        for x in tr[: 6 if narrow else 10]:
+            qa = f"{x['quote_amount']:.4f} {x['quote_symbol']}" if x.get("quote_amount") is not None else "quote n/a"
+            t.append(f"  {utc(x['ts'])} {x['side']:<4} {fit(x['token']['symbol'], 12):<12} {qa} tx {short(x['tx'])}\n", style=SECONDARY)
+        if d.get("copy_test"):
+            t.append(f"\nCOPY-TEST\n  {d['copy_test']}\n", style=MUTED)
+        if d.get("note"):
+            t.append(f"\n{d['note']}\n", style=MUTED)
+        t.append("\nEsc back to the leaderboard row", style=MUTED)
+
+    def render_traders_summary(self, t: Text) -> None:
+        d = self.traders_doc or {}
+        pr = (d.get("presets") or {}).get(self.traders_preset, {})
+        r = self._selected_trader_row()
+        if r is None:
+            t.append("SELECTED WALLET\n\n", style=SECONDARY)
+            if d and not d.get("rows"):
+                t.append((d.get("empty_reason") or "no wallets pass this preset in the computed range") + "\n\n", style=TEXT)
+            else:
+                t.append("Move with ↑/↓ to read a wallet, Enter opens its card (positions, coins, trades).\n\n", style=SECONDARY)
+            t.append(pr.get("label", ""), style=MUTED)
+            return
+        rank = next((i for i, x in enumerate(self.traders_rows, 1) if x["wallet"] == r["wallet"]), 0)
+        t.append(f"{short(r['wallet'])}\n", style=f"bold {TEXT}")
+        t.append(f"{r['wallet']}\n", style=MUTED)
+        t.append(f"rank {rank} of {d.get('total', len(self.traders_rows))} · {self.traders_preset}\n\n", style=SECONDARY)
+
+        def fact(label: str, value: str, style: str = TEXT) -> None:
+            t.append(f"{label:<9}", style=SECONDARY)
+            t.append(value + "\n", style=style)
+
+        tags = ", ".join(r.get("tags") or []) or "no tags"
+        fact("TAGS", tags, PRIMARY if ("bot" in (r.get("tags") or []) or "deployer" in (r.get("tags") or [])) else TEXT)
+        fact("PNL", f"{r['pnl_eth']:+.4f} ETH · realized {r['realized_eth']:+.4f} · unrealized {r['unrealized_eth']:+.4f}")
+        fact("USD", f"${r['pnl_usd']:,.0f}" if r.get("pnl_usd") is not None else "n/a (no hourly rate)", TEXT if r.get("pnl_usd") is not None else MUTED)
+        fact("ROI", f"{r['roi'] * 100:+.0f}% on {r['cost_eth']:.3f} ETH · fees {r['fees_eth']:.4f}" if r.get("roi") is not None else "n/a", SECONDARY)
+        wr = f"{r['win_rate'] * 100:.0f}%" if r.get("win_rate") is not None else "n/a"
+        fact("TRADES", f"{r['trades']} · {r['coins']} coins · {r['positions_closed']} closed ({wr} won) · {r['positions_open']} open", SECONDARY)
+        fact("HOLD", f"median {dur(int(r['median_hold_s'])) if r.get('median_hold_s') is not None else 'n/a'} · {r['trades_per_hour']:.1f}/h", SECONDARY)
+        eq = f"{r['exit_quality']:.2f}" if r.get("exit_quality") is not None else "n/a"
+        ra = f"{r['rug_avoid'] * 100:.0f}%" if r.get("rug_avoid") is not None else "n/a"
+        sn = f"{r['sniper_share'] * 100:.0f}%" if r.get("sniper_share") is not None else "n/a"
+        fact("ENTRY", f"buyer rank {f'{r['buyer_rank_median']:.0f}' if r.get('buyer_rank_median') is not None else 'n/a'} · sniper {sn}", SECONDARY)
+        fact("EXIT", f"exit quality {eq} · rug avoided {ra}", SECONDARY)
+        fact("QUALITY", f"{r['quality']:.3f}", f"bold {TEXT}")
+        fact("LAST", f"{utc(r.get('last_ts'))} UTC", SECONDARY)
+        t.append("\nEnter: wallet card (positions, coins, trades, copy-test note)", style=MUTED)
+
     def action_screen(self, name: str) -> None:
-        if name not in ("feed", "radar") or name == self.screen_mode:
+        if name not in ("feed", "radar", "traders") or name == self.screen_mode:
             return
         self.screen_mode = name
         feed = self.query_one("#feed", DataTable)
         rt = self.query_one("#radar", DataTable)
-        feed.set_class(name == "radar", "hidden")
+        tt = self.query_one("#traders", DataTable)
+        feed.set_class(name != "feed", "hidden")
         rt.set_class(name == "radar", "visible")
-        (rt if name == "radar" else feed).focus()
+        tt.set_class(name == "traders", "visible")
+        {"feed": feed, "radar": rt, "traders": tt}[name].focus()
         self.detail_mode = "summary"
         self.edge_doc = None
         self.coin_doc = None
+        self.wallet_doc = None
         if name == "radar":
             self.fetch_radar()
+        elif name == "traders":
+            self.fetch_traders()
         self.render_brand()
         self.render_feedhead()
         self.render_detail()
@@ -978,7 +1235,7 @@ class StampedeTUI(App):
 
     def _tabs_line(self) -> Text:
         t = Text()
-        for key, name, mode in (("1", "FEED", "feed"), ("2", "RADAR", "radar")):
+        for key, name, mode in (("1", "FEED", "feed"), ("2", "RADAR", "radar"), ("3", "TRADERS", "traders")):
             active = self.screen_mode == mode
             if active:
                 t.append("▌", style=f"{PRIMARY} on {ACTIVE}")
@@ -986,7 +1243,7 @@ class StampedeTUI(App):
             else:
                 t.append(f" {key} {name} ", style=SECONDARY)
             t.append("  ")
-        t.append("1/2 switch view · Tab moves between panes", style=MUTED)
+        t.append("1/2/3 switch view · Tab moves between panes", style=MUTED)
         return t
 
     def render_brand(self) -> None:
@@ -1073,7 +1330,20 @@ class StampedeTUI(App):
         n = len(self.events)
         table = self.query_one("#feed", DataTable)
         shown = table.row_count
-        head = self._pane_marker("radar" if self.screen_mode == "radar" else "feed")
+        head = self._pane_marker({"radar": "radar", "traders": "traders"}.get(self.screen_mode, "feed"))
+        if self.screen_mode == "traders":
+            d = self.traders_doc or {}
+            rng = d.get("range") or {}
+            head.append(f"TRADERS · {self.traders_preset.upper()}", style=f"bold {TEXT}")
+            if d.get("run"):
+                head.append(f" · {d.get('total', 0)} wallets" + ("" if self._narrow() else f" · stats {utc(rng.get('from_ts'))}–{utc(rng.get('to_ts'))} UTC · FIFO after fees"), style=SECONDARY)
+            elif d:
+                head.append(" · no wallet_stats in this store · run stampede traders", style=MUTED)
+            else:
+                head.append(" · loading…", style=MUTED)
+            self.query_one("#feedhead", Static).update(head)
+            self.render_detailhead()
+            return
         if self.session is None and not self.api_error:
             head.append("CONNECTING TO API · loading the visible history…", style=SECONDARY)
             self.query_one("#feedhead", Static).update(head)
@@ -1135,6 +1405,12 @@ class StampedeTUI(App):
         elif self.detail_mode == "coin":
             marker.append("COIN CARD", style=f"bold {TEXT}")
             marker.append(" · Esc back · r refresh context", style=SECONDARY)
+        elif self.detail_mode == "wallet":
+            marker.append("WALLET CARD", style=f"bold {TEXT}")
+            marker.append(" · Esc back", style=SECONDARY)
+        elif self.screen_mode == "traders":
+            marker.append("SELECTED WALLET", style=f"bold {TEXT}")
+            marker.append(" · Enter opens the card", style=SECONDARY)
         elif self.screen_mode == "radar":
             marker.append("SELECTED COIN", style=f"bold {TEXT}")
             marker.append(" · Enter opens the card", style=SECONDARY)
@@ -1150,6 +1426,11 @@ class StampedeTUI(App):
         t = Text()
         if self.detail_mode == "coin" and self.coin_doc:
             self.render_coin(t)
+            body.update(t)
+            self.render_detailhead()
+            return
+        if self.detail_mode == "wallet" and self.wallet_doc:
+            self.render_wallet(t)
             body.update(t)
             self.render_detailhead()
             return
@@ -1176,6 +1457,8 @@ class StampedeTUI(App):
             t.append("\n≈ interpolated block time · Esc back", style=MUTED)
         elif self.screen_mode == "radar":
             self.render_radar_summary(t)
+        elif self.screen_mode == "traders":
+            self.render_traders_summary(t)
         else:
             row = self._selected_event()
             if row is None:
@@ -1278,13 +1561,15 @@ class StampedeTUI(App):
             back = "Esc back" if self.detail_mode != "summary" else "Esc to the table"
             return [(0, "DETAILS"), (0, "↑/↓ PgUp/PgDn scroll"), (0, "Tab back to the table"), (1, back), *ctl, (0, "q quit")]
         if self.screen_mode == "radar":
-            return [(0, "↑/↓ select"), (0, "Enter coin card"), (1, "Esc back"), (2, "presets u under radar · g graduating · s smart rotators · a all"), (1, "Tab details"), (0, "1 feed"), *ctl, (0, "q quit")]
-        return [(0, "↑/↓ select"), (0, "Enter evidence"), (1, "Esc back"), (0, "/ search"), (1, "End follow latest"), (1, "Tab details"), (0, "2 radar"), *ctl, (0, "q quit")]
+            return [(0, "↑/↓ select"), (0, "Enter coin card"), (1, "Esc back"), (2, "presets u under radar · g graduating · s smart rotators · a all"), (1, "Tab details"), (0, "1 feed"), (0, "3 traders"), *ctl, (0, "q quit")]
+        if self.screen_mode == "traders":
+            return [(0, "↑/↓ select"), (0, "Enter wallet card"), (1, "Esc back"), (2, "presets t top · m smart · n snipers · b bots"), (1, "Tab details"), (0, "1 feed"), (0, "2 radar"), *ctl, (0, "q quit")]
+        return [(0, "↑/↓ select"), (0, "Enter evidence"), (1, "Esc back"), (0, "/ search"), (1, "End follow latest"), (1, "Tab details"), (0, "2 radar"), (0, "3 traders"), *ctl, (0, "q quit")]
 
     def _render_keys(self) -> None:
         hints = self._key_hints()
         width = max(20, self.size.width - 2)
-        short_forms = {"presets u under radar · g graduating · s smart rotators · a all": "u g s a presets", "End follow latest": "End follow", "Enter evidence": "Enter open", "Enter coin card": "Enter card", "space play/pause": "space play", "←/→ seek 60s": "←/→ ±60s", "Tab back to the table": "Tab table", "Esc to the table": "Esc table", "↑/↓ PgUp/PgDn scroll": "↑/↓ scroll"}
+        short_forms = {"presets u under radar · g graduating · s smart rotators · a all": "u g s a presets", "presets t top · m smart · n snipers · b bots": "t m n b presets", "End follow latest": "End follow", "Enter evidence": "Enter open", "Enter coin card": "Enter card", "Enter wallet card": "Enter card", "space play/pause": "space play", "←/→ seek 60s": "←/→ ±60s", "Tab back to the table": "Tab table", "Esc to the table": "Esc table", "↑/↓ PgUp/PgDn scroll": "↑/↓ scroll"}
         line = " · ".join(h for _, h in hints)
         if len(line) > width:
             hints = [(p, short_forms.get(h, h)) for p, h in hints]
@@ -1297,8 +1582,11 @@ class StampedeTUI(App):
         self.query_one("#keys", Static).update(Text(line, style=SECONDARY))
 
     # ---- focus / panes ----
+    def _active_table(self) -> DataTable:
+        return self.query_one({"radar": "#radar", "traders": "#traders"}.get(self.screen_mode, "#feed"), DataTable)
+
     def _panes(self) -> list[Any]:
-        table = self.query_one("#radar" if self.screen_mode == "radar" else "#feed", DataTable)
+        table = self._active_table()
         panes: list[Any] = [table, self.query_one("#detail", VerticalScroll)]
         search = self.query_one("#search", Input)
         if search.has_class("visible"):
@@ -1346,7 +1634,7 @@ class StampedeTUI(App):
             if self.detail_mode == "summary":
                 self.render_detail()
             self.render_feedhead()
-        elif table.id == "radar" and self.detail_mode == "summary":
+        elif table.id in ("radar", "traders") and self.detail_mode == "summary":
             self.render_detail()
 
     def on_data_table_row_selected(self, ev: DataTable.RowSelected) -> None:
@@ -1360,6 +1648,16 @@ class StampedeTUI(App):
         self._open_selected()
 
     def _open_selected(self) -> None:
+        if self.screen_mode == "traders":
+            r = self._selected_trader_row()
+            if r:
+                self.wallet_addr = r["wallet"]
+                self.detail_mode = "wallet"
+                self.wallet_doc = None
+                self.query_one("#detailbody", Static).update(Text(f"{short(r['wallet'])}\nloading wallet card…", style=SECONDARY))
+                self.render_detailhead()
+                self.load_wallet(r["wallet"])
+            return
         if self.screen_mode == "radar":
             r = self._selected_radar_row()
             if r:
@@ -1400,7 +1698,7 @@ class StampedeTUI(App):
 
     def action_back(self) -> None:
         search = self.query_one("#search", Input)
-        table = self.query_one("#radar" if self.screen_mode == "radar" else "#feed", DataTable)
+        table = self._active_table()
         if search.has_class("visible"):
             search.value = ""
             self.filter_text = ""
@@ -1413,6 +1711,7 @@ class StampedeTUI(App):
             self.detail_mode = "summary"
             self.edge_doc = None
             self.coin_doc = None
+            self.wallet_doc = None
             self.render_detail()
             self.render_keys()
             return
@@ -1444,8 +1743,8 @@ class StampedeTUI(App):
         if fid == "detail":
             focused.scroll_end(animate=False) if last else focused.scroll_home(animate=False)
             return
-        if self.screen_mode == "radar":
-            rt = self.query_one("#radar", DataTable)
+        if self.screen_mode in ("radar", "traders"):
+            rt = self._active_table()
             if rt.row_count:
                 rt.move_cursor(row=rt.row_count - 1 if last else 0, scroll=True)
             return

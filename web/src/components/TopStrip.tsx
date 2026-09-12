@@ -2,8 +2,8 @@ import { useRef } from 'react'
 import { duration, utc } from '../format'
 import type { SessionState, Status } from '../types'
 
-export type View = 'radar' | 'flow' | 'map'
-const VIEWS: View[] = ['radar', 'flow', 'map']
+export type View = 'radar' | 'flow' | 'map' | 'traders'
+const VIEWS: View[] = ['radar', 'flow', 'map', 'traders']
 const SPEEDS = [1, 10, 20, 60]
 
 interface Props {

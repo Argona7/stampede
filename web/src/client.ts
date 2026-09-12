@@ -1,3 +1,4 @@
+import type { LookupResponse, TradersResponse, WalletCardData } from './tradersTypes'
 import type { AlertsResponse, CoinDetail, EdgeDetail, Graph, RadarResponse, Status, TokenDetail, TokenLabel } from './types'
 
 async function get<T>(url: string): Promise<T> {
@@ -24,4 +25,7 @@ export const api = {
   radar: (p: Record<string, string | number | null | undefined>) => get<RadarResponse>(`/api/radar?${q(p)}`),
   coin: (addr: string, refresh = false) => get<CoinDetail>(`/api/coin/${addr}?${q({ refresh: refresh ? 1 : 0 })}`),
   alerts: () => get<AlertsResponse>('/api/alerts'),
+  traders: (p: Record<string, string | number | null | undefined>) => get<TradersResponse>(`/api/traders?${q(p)}`),
+  wallet: (addr: string, clock: number | null = null) => get<WalletCardData>(`/api/wallet/${addr}?${q({ clock })}`),
+  tradersLookup: (wallets: string[]) => get<LookupResponse>(`/api/traders/lookup?${q({ wallets: wallets.join(',') })}`),
 }
