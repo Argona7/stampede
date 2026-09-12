@@ -34,6 +34,7 @@ from .bus import Bus, Histogram
 from .feed import ENDPOINTS, Block, BlockAssembler, Feed, PonsBloom, make_backfill_fn, parse_log
 from .state import (
     ALERT_INSERT,
+    ALERT_SYMBOL,
     ALERT_UPDATE,
     CURVE_INSERT,
     GRAD_IGNORE_INSERT,
@@ -157,6 +158,7 @@ class Writer(threading.Thread):
             (SEQ_INSERT, b.sequences, "sequences"),
             (ALERT_INSERT, b.alerts, "alerts"),
             (ALERT_UPDATE, b.alert_updates, "alert_updates"),
+            (ALERT_SYMBOL, b.alert_symbols, "alert_symbols"),
         ):
             if rows:
                 db.executemany(sql, rows)
@@ -430,6 +432,12 @@ class Engine:
             sym, name = chain.dec_string(s)[:32] or "?", chain.dec_string(n or "")[:64] or ""
             st.set_label(t, sym, name)
             wb.token_meta.append((sym, name, t))
+            if t in st.alert_recent:  # alerted seconds after launch, before the symbol was known: fix the journal row
+                label = st.label(t)["symbol"]
+                wb.alert_symbols.append((label, t))
+                for p in st.alert_pending:
+                    if p.token == t and p.symbol == "?":
+                        p.symbol = label
             self.resolver_stats["meta_resolved"] += 1
         self.writer.enqueue(wb)
 

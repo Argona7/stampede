@@ -42,6 +42,7 @@ POOL_INSERT = "INSERT OR IGNORE INTO pools(pool_id,currency0,currency1,fee,tick_
 INFRA_INSERT = "INSERT OR IGNORE INTO infra(address,kind,source) VALUES(?,?,?)"
 ALERT_INSERT = "INSERT INTO alerts(created_ts, clock_ts, mode, token, symbol, rule, score, inflow, mentions_1h, price, detail) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
 ALERT_UPDATE = "UPDATE alerts SET outcome_30m=COALESCE(?, outcome_30m), outcome_60m=COALESCE(?, outcome_60m), graduated_after=COALESCE(?, graduated_after), outcome_checked_ts=? WHERE mode='live' AND token=? AND clock_ts=?"
+ALERT_SYMBOL = "UPDATE alerts SET symbol=? WHERE mode='live' AND token=? AND (symbol IS NULL OR symbol='?')"
 WALLET_UPSERT = "INSERT INTO wallets(address,is_contract,trades) VALUES(?,NULL,?) ON CONFLICT(address) DO UPDATE SET trades=wallets.trades+excluded.trades"
 # the alert rule of the context worker (docs/RADAR.md); the same parameters, evaluated per block here
 RULES = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}
@@ -132,20 +133,23 @@ class WriteBatch:
     infra: list[tuple] = field(default_factory=list)
     alerts: list[tuple] = field(default_factory=list)
     alert_updates: list[tuple] = field(default_factory=list)
+    alert_symbols: list[tuple] = field(default_factory=list)  # (symbol, token): a coin alerted before its symbol resolved
     token_meta: list[tuple] = field(default_factory=list)  # (symbol, name, address)
     wallets: Counter = field(default_factory=Counter)
     meta: dict[str, Any] = field(default_factory=dict)
     created: float = field(default_factory=time.time)
 
+    LISTS = ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "alert_symbols", "token_meta")
+
     def extend(self, o: "WriteBatch") -> None:
-        for k in ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "token_meta"):
+        for k in self.LISTS:
             getattr(self, k).extend(getattr(o, k))
         self.wallets.update(o.wallets)
         self.meta.update(o.meta)
         self.created = min(self.created, o.created)
 
     def rows(self) -> int:
-        return sum(len(getattr(self, k)) for k in ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "token_meta")) + len(self.wallets)
+        return sum(len(getattr(self, k)) for k in self.LISTS) + len(self.wallets)
 
 
 @dataclass
