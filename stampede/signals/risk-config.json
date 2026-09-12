@@ -1,0 +1,18 @@
+{
+  "bankroll_quote": 1.0,
+  "cap_per_trade_quote": 0.02,
+  "cap_bankroll_frac": 0.02,
+  "max_concurrent": 3,
+  "daily_stop_frac": 0.05,
+  "kelly_fraction": 0.5,
+  "vol_ref_range_5m": 0.3,
+  "vol_min_scale": 0.25,
+  "min_trade_quote": 0.005,
+  "exit_now": {
+    "sell_ratio_10m": 2.0,
+    "out_in_10m": 1.5,
+    "min_sells_10m": 4,
+    "progress_drop_5m": -0.05,
+    "graduation_progress": 0.97
+  }
+}
