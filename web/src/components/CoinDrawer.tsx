@@ -95,6 +95,34 @@ export default function CoinDrawer({ coin, loading, error, session, onClose, onR
             </span>
           </div>
 
+          <h2>Verdict {coin.verdict?.source ? `· ${coin.verdict.source === 'model' ? 'runner model' : 'calibrated rules, no model file'}` : ''}</h2>
+          {coin.verdict ? (
+            <div className="kv verdict-kv" data-testid="verdict-section">
+              <span>action</span>
+              <span className={coin.verdict.action === 'ENTER' ? 'enter' : ''}>{coin.verdict.action}</span>
+              <span title="probability that the median price reaches 2× within 30 min, measured out of sample (docs/RESEARCH-EDGE.md)">p ≥ 2× / −50% in 30 min</span>
+              <span>
+                {coin.verdict.p_2x_30m !== null && coin.verdict.p_2x_30m !== undefined ? `${Math.round(coin.verdict.p_2x_30m * 100)}%` : '—'} / {coin.verdict.p_minus50_30m !== null && coin.verdict.p_minus50_30m !== undefined ? `${Math.round(coin.verdict.p_minus50_30m * 100)}%` : '—'}
+              </span>
+              <span title="expected simulated pnl per trade of the exit plan at this probability, in the quote asset">EV per trade</span>
+              <span>{coin.verdict.ev_per_trade_quote !== null && coin.verdict.ev_per_trade_quote !== undefined ? `${coin.verdict.ev_per_trade_quote >= 0 ? '+' : ''}${coin.verdict.ev_per_trade_quote.toFixed(4)} ${coin.as_of.quote_symbol ?? ''}` : '—'}</span>
+              <span>size</span>
+              <span>{coin.verdict.size?.allowed ? `${coin.verdict.size.quote.toFixed(4)} ${coin.as_of.quote_symbol ?? ''} · ${coin.verdict.size.capped_by}` : `none${coin.verdict.size?.capped_by ? ` · ${coin.verdict.size.capped_by}` : ''}`}</span>
+              <span>entry window</span>
+              <span>{coin.verdict.entry_window ? `${coin.verdict.entry_window.valid_s} s` : '—'}</span>
+              <div className="plan">
+                <ul>
+                  {(coin.verdict.exit_plan?.text ?? []).map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+              <div className="faint tiny">{coin.verdict.reasons.join(' · ')}</div>
+            </div>
+          ) : (
+            <div className="faint" data-testid="verdict-section">n/a · verdict not computed</div>
+          )}
+
           <h2>Launch {intel ? '· from indexed trades and lifecycle logs' : ''}</h2>
           {intel ? (
             <div className="kv launch-kv" data-testid="launch-section">

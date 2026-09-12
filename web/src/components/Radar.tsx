@@ -85,6 +85,23 @@ function scoreHint(r: RadarRow): string {
   return `score parts: ${bits.join(' · ')}`
 }
 
+// VERDICT column (stage 4/5): action · p(≥2× in 30 min); ENTER carries the size. The tooltip holds the reasons and the
+// exit plan; the drawer shows them in full. p is an out-of-sample rate from docs/RESEARCH-EDGE.md, not a promise.
+const verdictTitle = (r: RadarRow): string => {
+  const v = r.verdict
+  if (!v) return 'verdict not computed'
+  const bits = [...(v.reasons ?? [])]
+  if (v.exit_plan?.text?.length) bits.push('plan: ' + v.exit_plan.text.join(' · '))
+  if (v.source) bits.push(`source: ${v.source === 'model' ? 'runner model' : 'calibrated rules (no model file)'}`)
+  return bits.join('\n')
+}
+const verdictText = (r: RadarRow) => {
+  const v = r.verdict
+  if (!v) return null
+  const p = v.p_2x_30m === null || v.p_2x_30m === undefined ? '' : ` ${Math.min(99, Math.round(v.p_2x_30m * 100))}%`
+  return `${v.action}${p}` // the size and the plan live in the tooltip and the drawer: the column stays 75 px
+}
+
 export default function Radar({ data, alerts, session, error, filters, setFilters, selected, active, onSelect, onMove, onFlow, onPick, freshTokens }: Props) {
   const presets = data?.presets ?? {}
   const presetKeys = Object.keys(presets).length ? Object.keys(presets) : PRESET_ORDER
@@ -358,6 +375,9 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
                       <th className="c-launch c-lfarm" title="LAUNCH · farm: ≥ 3 launches within 30 min sharing dev-buy amount and creator tax from wallets first seen < 24 h ago">
                         farm
                       </th>
+                      <th className="c-verdict" title="VERDICT (stage 4/5): ENTER / WAIT / AVOID · p(≥ 2× within 30 min) from the walk-forward runner model (or the calibrated rules when no model file exists); the size and the exit plan are in the cell tooltip and the drawer. Measured out of sample in docs/RESEARCH-EDGE.md; not a promise.">
+                        verdict
+                      </th>
                       <th className={`num c-score ${sort[2] === 'c-score' ? 'sorted' : ''}`}>score</th>
                     </tr>
                   </thead>
@@ -426,6 +446,9 @@ export default function Radar({ data, alerts, session, error, filters, setFilter
                           </td>
                           <td className={`c-launch c-lfarm ${r.launch?.launch_farm ? 'warn' : ''}`} title={launchTitle(r)}>
                             {r.launch?.launch_farm === true ? 'farm' : r.launch?.launch_farm === false ? <span className="unk">–</span> : NA}
+                          </td>
+                          <td className={`c-verdict ${r.verdict?.action === 'ENTER' ? 'enter' : r.verdict?.action === 'AVOID' ? 'avoid' : ''}`} title={verdictTitle(r)} data-testid="verdict-cell">
+                            {verdictText(r) ?? UNK}
                           </td>
                           <td className="num c-score" title={scoreHint(r)}>
                             {Math.round(r.score)}

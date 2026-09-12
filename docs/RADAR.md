@@ -42,6 +42,7 @@ Filters: minimum wallets in range, coin age, stage (curve / graduated), X 1h ≤
 | X mentions | twitterapi.io advanced search: `"$SYM" OR <contract> OR (SYM (robinhood OR pons OR memecoin))`, last 24 h, up to 60 tweets counted | live top-30, or drawer refresh | 5 min |
 | Wallet scores | `stampede.research.backtest --write-scores` on a research store, imported with `stampede wallet-scores --from` | import step | until re-imported |
 | Launch quality | `stampede launch-intel --db <store>` from indexed trades and lifecycle logs: dev buy share, tax-exempt bundle (proxy, exact when `SnipeTaxExempted` logs are indexed), creator tax, deployer record over 30 days, launch-farm flag, snipe-tax zero time (`docs/RESEARCH-LAUNCHES.md`). Shown as the `LAUNCH` column group (dev % · bndl · farm at 1440 px; tax and deployer rate when wider) and the drawer's *Launch* section; not scored yet | batch step; the drawer refresh reads the exact exemption list from the launch receipt | until recomputed |
+| Verdict | `signals.verdict` (stage 4/5): ENTER / WAIT / AVOID with p(≥ 2× within 30 min), p(−50%), EV per trade, the exit plan (TP ladder, trail, stop, time exit, exit-now triggers) and the risk-engine size (fractional Kelly under hard caps, volatility scaling, daily stop; `signals/risk-config.json`). p comes from the walk-forward model pickle `data/models/edge-<date>.pkl` when present, else from the calibrated rule cells in `signals/edge-config.json` (both written by `stampede edge`, measured in `docs/RESEARCH-EDGE.md`). Shown as the `verdict` column (ENTER in red; the short address yields at 1440 px) and the drawer's *Verdict* section; one line on the TUI coin card | computed with every radar row from the row's own features; < 2 ms with the model | per clock |
 
 Replay mode keeps to as-of-clock on-chain numbers; external "now" data is fetched only in live mode
 (`serve --context live`, default) or with `--context always`. Every external number carries its fetch time.
@@ -53,6 +54,11 @@ Rule `under_radar_top5`: a coin enters the radar top 5 with score ≥ 60, inflow
 unknown). One alert per coin per 30 min of clock time. Outcomes are filled in 30 and 60 clock-minutes later
 from indexed trades (median price of the last 5 trades) and graduation events. `/api/alerts` returns the
 journal and the running track record; `--notify` posts a macOS notification.
+
+Rule `edge_enter` (stage 4): the verdict says ENTER — p(≥ 2× in 30 min) at or above the threshold that gave 5
+alerts/hour on the train folds of `docs/RESEARCH-EDGE.md`, EV > 0, the risk engine allows a size — at most 5 per
+clock hour, ranked by p, one per coin per 30 min. The journal row's `detail` carries p, the size and the exit-plan
+lines; outcomes are filled by the same +30/+60 loop as the other rule.
 
 ## Honesty
 

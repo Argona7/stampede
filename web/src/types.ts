@@ -242,6 +242,24 @@ export interface RadarSource {
   wallets: number
 }
 
+// Stage 4/5 verdict per coin (signals.verdict): the runner model's probability or the calibrated rules when no model
+// file exists (`source`), the exit plan and the risk-engine size. Never a promise: p is a measured out-of-sample rate.
+export interface Verdict {
+  action: 'ENTER' | 'WAIT' | 'AVOID'
+  p_2x_30m: number | null
+  p_50_30m?: number | null
+  p_minus50_30m: number | null
+  ev_per_trade_quote: number | null
+  ev_ref_quote?: number | null
+  entry_window?: { valid_s: number; note: string }
+  exit_plan?: { tp: [number, number][]; sl: number | null; trail: number | null; time_exit_s: number; triggers: string[]; text: string[] }
+  size?: { quote: number; allowed: boolean; capped_by: string | null; kelly: number; vol_scale: number }
+  reasons: string[]
+  source?: 'model' | 'rules'
+  thresholds?: { p_enter: number; p_wait: number }
+  error?: string
+}
+
 export interface RadarRow extends TokenLabel {
   symbol_raw?: string
   inflow_10m: number
@@ -271,6 +289,7 @@ export interface RadarRow extends TokenLabel {
   vol_1h_quote: number
   buyers_1h: number
   launch?: LaunchIntel | null
+  verdict?: Verdict
   market_now?: { price_usd: number | null; fdv_usd: number | null; reserve_usd: number | null; vol_h1: number | null; chg_h1: number | null; url: string; fetched_at: number }
   holders?: { holders: number; top10_share: number; dev_share: number | null; dev_sold_share: number; launch_block_buyers: number; as_of_block: number }
 }
@@ -294,6 +313,7 @@ export interface CoinDetail extends TokenLabel {
   symbol_raw?: string
   launch: { deployer: string; pair_token: string; threshold: number | null; block: number; ts: number | null; tx_hash: string; source: string; intel?: LaunchIntel | null } | null
   age_s: number | null
+  verdict?: Verdict
   progress: { progress: number | null; stage: string; graduated: boolean; curve_trades: number; curve_traders: number; threshold_raw: number | null; net_quote_raw: number; graduation: { ts: number | null; tx_hash: string | null } | null }
   as_of: { price_quote: number | null; quote_symbol: string | null; chg_5m: number | null; chg_1h: number | null; vol_1h_quote: number; trades_1h: number; buyers_1h: number; buys_1h?: number; as_of_ts: number }
   inbound: { token: TokenLabel; wallets_main: number; wallets_all: number }[]
@@ -323,7 +343,7 @@ export interface AlertRow {
   inflow: number
   mentions_1h: number | null
   price: number | null
-  detail: { rank: number; sources: RadarSource[]; accel: number; breadth: number; age_s: number | null; stage: string; mentions_known: boolean } | null
+  detail: { rank: number; sources: RadarSource[]; accel: number; breadth: number; age_s: number | null; stage: string; mentions_known?: boolean; p_2x_30m?: number | null; size_quote?: number | null; exit_plan?: string[] | null; source?: string } | null
   outcome_30m: number | null
   outcome_60m: number | null
   graduated_after: number | null

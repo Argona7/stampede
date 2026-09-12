@@ -1308,6 +1308,51 @@ hr {
   color: var(--primary);
 }
 
+/* VERDICT column (stage 4/5): dense mono, ENTER in the brand red with the size, WAIT / AVOID neutral */
+.radar-table .c-verdict {
+  padding: 0 6px;
+  color: var(--secondary);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.radar-table .c-verdict.enter {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.radar-table .c-verdict.avoid {
+  color: var(--muted);
+}
+
+.verdict-kv .plan {
+  grid-column: 1 / -1;
+  padding: 2px 0 0 0;
+  color: var(--text);
+}
+
+.verdict-kv .plan li {
+  list-style: none;
+  padding: 1px 0;
+}
+
+.verdict-kv .plan li::before {
+  content: '→ ';
+  color: var(--secondary);
+}
+
+.verdict-kv .plan ul {
+  margin: 0;
+  padding: 0;
+}
+
+.verdict-kv .enter {
+  color: var(--primary);
+  font-weight: 600;
+}
+
 /* the group leaves after the sparkline, before the core columns: at the default 1440 width (1140 px list next to
    the alerts) dev % / bundle / farm stay; creator tax, the deployer rate and the holders column go first (all three
    are in the drawer and in the cell tooltip) */
@@ -1319,7 +1364,11 @@ hr {
   }
 
   .radar-row .c-from {
-    max-width: 160px; /* already ellipsized; 40 px pay for the three launch flags */
+    max-width: 140px; /* already ellipsized; 40 px pay for the three launch flags, 20 more for the verdict */
+  }
+
+  .radar-row .c-coin .addr {
+    display: none; /* the short address pays for the VERDICT column; it stays in the drawer, the tooltip and search */
   }
 }
 

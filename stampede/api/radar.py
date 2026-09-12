@@ -12,6 +12,7 @@ from typing import Any
 from .. import chain
 from ..context import launch_intel, pons
 from ..context.market import curve_stats
+from ..research import features
 from ..store import Store
 from . import queries
 from . import traders_api
@@ -260,8 +261,75 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
         hd = (ctx.get("holders") or {}).get(tok)
         if hd and "holders" in hd:
             row["holders"] = {k: hd.get(k) for k in ("holders", "top10_share", "dev_share", "dev_sold_share", "launch_block_buyers", "as_of_block")}
+        row["_vf"] = verdict_features(row, hour_trades.get(tok, []), clock, qdec, (la or {}).get("deployer"))
         out.append(row)
+    attach_verdicts(out)
     return out
+
+
+def verdict_features(row: dict[str, Any], hour_rows: list[tuple], clock: int, qdec: dict[str, int], deployer: str | None) -> dict[str, Any]:
+    """The runner-model feature dict (research.features.MODEL_FEATURES names) from a radar row and the coin's last hour
+    of trades (ts, side, token_amount, quote_amount, quote_token, wallet). Unknown = missing, never 0."""
+    quote = hour_rows[-1][4] if hour_rows else None
+    dec = qdec.get(quote or "", 18)
+    scale = 10.0 ** (-dec)
+    win10 = [r for r in hour_rows if r[0] > clock - 600]
+    fs = features.flow_stats(((r[0], r[1], r[2], r[3], r[5]) for r in win10), scale)
+    p5 = [(r[3] / r[2]) for r in hour_rows if r[0] > clock - 300 and r[2] > 0 and r[3] > 0]
+    li = row.get("launch") or {}
+    smart = row.get("smart_inflow") or {}
+    f: dict[str, Any] = {
+        "is_eth": (quote == chain.NATIVE) if quote else None,
+        "quote_symbol": row.get("quote_symbol"),
+        "stage": row.get("stage"),
+        "age_s": row.get("age_s"),
+        "since_snipe_zero_s": (clock - li["snipe_tax_zero_ts"]) if li.get("snipe_tax_zero_ts") else None,
+        "progress": row.get("progress"),
+        **fs,
+        "trades_1h": len(hour_rows),
+        "buyers_1h": row.get("buyers_1h"),
+        "vol_1h": row.get("vol_1h_quote"),
+        "mom_5m": (row["chg_5m"] / 100) if row.get("chg_5m") is not None else None,
+        "mom_10m": (row["chg_10m"] / 100) if row.get("chg_10m") is not None else None,
+        "range_5m": (max(p5) / min(p5) - 1) if len(p5) >= 2 and min(p5) > 0 else (0.0 if p5 else None),
+        "insider_sells_10m": sum(1 for r in win10 if r[1] == "sell" and r[5] == deployer) if deployer else None,
+        "dev_sold_10m": (sum(r[3] for r in win10 if r[1] == "sell" and r[5] == deployer) * scale) if deployer else None,
+        "inflow_10m": row.get("inflow_10m"),
+        "inflow_prev_per_10m": row.get("inflow_prev_per_10m"),
+        "accel": row.get("accel"),
+        "breadth": row.get("breadth"),
+        "sequences_10m": row.get("sequences_10m"),
+        "rot_share": (row["inflow_10m"] / fs["buyers_10m"]) if fs.get("buyers_10m") and row.get("inflow_10m") is not None else None,
+        "quality": row.get("quality"),
+        "smart_inflow": smart.get("count") if smart else None,
+        "smart_inflow_q": smart.get("mean_quality") if smart else None,
+        "li_observed": (1 if li.get("observed") else 0) if li else None,
+        "dev_buy_share": li.get("dev_buy_share"),
+        "bundle_n": li.get("bundle_n"),
+        "creator_tax_bps": li.get("creator_tax_bps"),
+        "deployer_prior_launches_30d": li.get("deployer_prior_launches_30d"),
+        "deployer_graduation_rate": li.get("deployer_graduation_rate"),
+        "launch_farm": (None if li.get("launch_farm") is None else int(bool(li.get("launch_farm")))),
+        "socials_present": (None if li.get("socials_present") is None else int(bool(li.get("socials_present")))),
+        "first_buyers_5s": li.get("first_buyers_5s"),
+        "taxed_snipers_3s": li.get("taxed_snipers_3s"),
+    }
+    return f
+
+
+def attach_verdicts(rows: list[dict[str, Any]]) -> None:
+    """row['verdict'] for every row from its feature dict (`_vf`, consumed here): one batched model call."""
+    from ..signals import verdict as verdict_mod
+
+    feats = [r.pop("_vf", None) or {} for r in rows]
+    if not rows:
+        return
+    try:
+        vs = verdict_mod.verdicts(feats)
+    except Exception as e:  # noqa: BLE001 - the verdict must never take the radar down
+        vs = [{"action": "WAIT", "p_2x_30m": None, "error": f"{type(e).__name__}: {str(e)[:80]}"} for _ in rows]
+    for r, v in zip(rows, vs):
+        r["verdict"] = v
 
 
 def stats_from_rows(rows: list[tuple], as_of_ts: int, quote_decimals: dict[str, int]) -> dict[str, Any]:
@@ -295,6 +363,30 @@ def stats_from_rows(rows: list[tuple], as_of_ts: int, quote_decimals: dict[str, 
     }
 
 
+def coin_verdict(store: Store, token: str, window_s: int, clock: int, la: dict[str, Any] | None, prog: dict[str, Any], cs: dict[str, Any], age_s: int | None, qdec: dict[str, int], qsym: dict[str, str]) -> dict[str, Any]:
+    """The stage-4 verdict for one coin at the clock, from the same inputs the radar row would carry (three cheap
+    queries: the last hour of trades, the rotation inflow of the last 30 min, the wallet scores of those wallets)."""
+    q = store.db.execute
+    hour = q("SELECT ts, side, CAST(token_amount AS REAL), CAST(quote_amount AS REAL), quote_token, wallet FROM trades WHERE token=? AND ts>? AND ts<=? AND CAST(quote_amount AS REAL)>0 AND CAST(token_amount AS REAL)>0 ORDER BY ts", (token, clock - 3600, clock)).fetchall()
+    seqs = q("SELECT wallet, sell_token, buy_ts FROM sequences WHERE window_s=? AND grade IN ('direct','clean') AND buy_token=? AND buy_ts>? AND buy_ts<=?", (window_s, token, clock - 1800, clock)).fetchall()
+    bots = {r[0] for r in q("SELECT wallet FROM wallet_scores WHERE is_bot=1")}
+    w10 = {w for w, _s, ts in seqs if ts > clock - 600 and w not in bots}
+    wprev = {w for w, _s, ts in seqs if ts <= clock - 600 and w not in bots}
+    prev_rate = len(wprev) / 2.0
+    scores = {r[0]: r[1] for r in q(f"SELECT wallet, score FROM wallet_scores WHERE score IS NOT NULL AND wallet IN ({','.join('?' * len(w10))})", list(w10))} if w10 else {}
+    qs = [scores[w] for w in w10 if w in scores]
+    smart = traders_api.smart_inflow(store, w10) if w10 else None
+    row = {
+        "inflow_10m": len(w10), "inflow_prev_per_10m": prev_rate, "accel": (len(w10) / prev_rate) if prev_rate > 0 else float(len(w10)), "breadth": len({s for w, s, ts in seqs if ts > clock - 600 and w not in bots}),
+        "sequences_10m": sum(1 for w, _s, ts in seqs if ts > clock - 600 and w not in bots), "quality": (sum(qs) / len(qs)) if qs else None, "smart_inflow": smart,
+        "age_s": age_s, "stage": prog.get("stage"), "progress": prog.get("progress"), "chg_5m": cs.get("chg_5m"), "chg_10m": cs.get("chg_10m"), "buyers_1h": cs.get("buyers_1h"), "vol_1h_quote": cs.get("vol_1h_quote"),
+        "quote_symbol": qsym.get(cs.get("quote") or ""), "launch": (la or {}).get("intel"),
+    }
+    rows = [{**row, "_vf": verdict_features(row, hour, clock, qdec, (la or {}).get("deployer"))}]
+    attach_verdicts(rows)
+    return rows[0]["verdict"]
+
+
 def coin(store: Store, token: str, window_s: int, clock: int, span_s: int, rpc=None, context: dict[str, Any] | None = None, live: bool = False) -> dict[str, Any]:
     """Everything about one coin: on-chain lifecycle, as-of stats, inbound/outbound rotation, external context."""
     labels = queries.token_labels(store, {token})
@@ -314,6 +406,7 @@ def coin(store: Store, token: str, window_s: int, clock: int, span_s: int, rpc=N
         "launch": la,
         "age_s": age_s,
         "progress": prog,
+        "verdict": coin_verdict(store, token, window_s, clock, la, prog, cs, age_s, qdec, qsym),
         "as_of": {**cs, "quote_symbol": qsym.get(cs["quote"] or "")},
         "inbound": tokd.get("inbound", []),
         "outbound": tokd.get("outbound", []),

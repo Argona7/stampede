@@ -73,6 +73,24 @@ def launch_line(li: dict | None) -> str:
     return f"launch: dev {dev} · bundle {bundle if bundle is not None else 'n/a'} · tax {tax} · dep grad {grad} · farm {farm} · tax-free from {utc(li.get('snipe_tax_zero_ts'))} UTC (+{li.get('snipe_window_s') or 3}s)"
 
 
+def verdict_line(v: dict | None) -> str:
+    """One line of the stage-4/5 verdict for the coin card: action, p(2x), size and the exit plan; n/a when absent."""
+    if not v:
+        return "verdict: n/a"
+    p = v.get("p_2x_30m")
+    pd = v.get("p_minus50_30m")
+    sz = v.get("size") or {}
+    plan = " · ".join((v.get("exit_plan") or {}).get("text") or [])
+    src = "model" if v.get("source") == "model" else "rules"
+    bits = [f"verdict: {v.get('action', '?')}", f"p2x {p * 100:.0f}%" if p is not None else "p2x n/a"]
+    if pd is not None:
+        bits.append(f"p-50% {pd * 100:.0f}%")
+    if v.get("action") == "ENTER" and sz.get("allowed"):
+        bits.append(f"size {sz.get('quote'):.4f}")
+    bits.append(f"({src})")
+    return " · ".join(bits) + (f"\n  plan: {plan}" if plan else "")
+
+
 def dur(s: int | None) -> str:
     """Compact duration: 44s · 15m20s · 30m · 1h05m · 2h."""
     if s is None:
@@ -1012,6 +1030,8 @@ class StampedeTUI(App):
         if la:
             t.append(f"launched {utc(la.get('ts'))} UTC · deployer {short(la.get('deployer', ''))}\n", style=SECONDARY)
         t.append(launch_line(la.get("intel") if la else None) + "\n", style=SECONDARY)
+        v = c.get("verdict")
+        t.append(verdict_line(v) + "\n", style=(f"bold {PRIMARY}" if (v or {}).get("action") == "ENTER" else SECONDARY))
         c5 = aso.get("chg_5m")
         c1 = aso.get("chg_1h")
         t.append(f"price 5m {c5:+.1f}% · 1h {c1:+.1f}%\n" if c5 is not None and c1 is not None else "price change: n/a\n", style=TEXT)

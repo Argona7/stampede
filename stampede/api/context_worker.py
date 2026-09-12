@@ -35,7 +35,10 @@ class ContextWorker(threading.Thread):
         self.top_n = top_n
         self.status: dict[str, Any] = {"running": False, "last_cycle": None, "last_error": None, "cycles": 0, "context_enabled": False, "alerts_fired": 0}
         self._stop = threading.Event()
-        self.rules = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}  # inflow 8-40 & age < 1 h & not already +100%: 20% runner rate (3.8x base) in docs/RESEARCH-RUNNERS.md
+        self.rules = {
+            "under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100},  # inflow 8-40 & age < 1 h & not already +100%: 20% runner rate (3.8x base) in docs/RESEARCH-RUNNERS.md
+            "edge_enter": {"per_hour": 5, "dedupe_s": 1800},  # stage 4: verdict ENTER (p >= edge-config threshold, EV > 0, risk allows), top 5 per hour by p; docs/RESEARCH-EDGE.md
+        }
 
     def stop(self) -> None:
         self._stop.set()
@@ -100,7 +103,7 @@ class ContextWorker(threading.Thread):
                 continue
             if m1h is not None and m1h > rule["mentions_max"]:
                 continue
-            recent = store.db.execute("SELECT 1 FROM alerts WHERE token=? AND mode=? AND clock_ts>? LIMIT 1", (r["address"], self.mode, clock - 1800)).fetchone()
+            recent = store.db.execute("SELECT 1 FROM alerts WHERE token=? AND mode=? AND rule='under_radar_top5' AND clock_ts>? LIMIT 1", (r["address"], self.mode, clock - 1800)).fetchone()
             if recent:
                 continue
             store.db.execute(
@@ -110,6 +113,7 @@ class ContextWorker(threading.Thread):
             fired += 1
             if self.notify:
                 self._notify(f"STAMPEDE · {r['symbol']}", f"{r['inflow_10m']} wallets rotated in (10 min) · score {r['score']:.0f} · X 1h: {m1h if m1h is not None else 'n/a'}")
+        fired += self._edge_alerts(store, clock, rad)
         store.commit()
         self.status["alerts_fired"] += fired
         # outcomes: 30/60 min later (in clock time), measured from indexed trades
@@ -128,6 +132,31 @@ class ContextWorker(threading.Thread):
                 sets = ", ".join(f"{k}=?" for k in upd) + ", outcome_checked_ts=?"
                 store.db.execute(f"UPDATE alerts SET {sets} WHERE id=?", (*upd.values(), int(time.time()), aid))
         store.commit()
+
+    def _edge_alerts(self, store: Store, clock: int, rad: dict[str, Any]) -> int:
+        """Stage-4 rule `edge_enter`: the verdict says ENTER (model or calibrated rules, threshold from edge-config.json),
+        at most `per_hour` alerts per clock hour, one per coin per 30 min. Journaled like the other rule; the outcome
+        loop below fills +30/+60 for every rule."""
+        rule = self.rules["edge_enter"]
+        enter = sorted((r for r in rad["rows"] if (r.get("verdict") or {}).get("action") == "ENTER"), key=lambda r: -(r["verdict"].get("p_2x_30m") or 0))
+        if not enter:
+            return 0
+        recent_n = store.db.execute("SELECT COUNT(*) FROM alerts WHERE rule='edge_enter' AND mode=? AND clock_ts>?", (self.mode, clock - 3600)).fetchone()[0]
+        fired = 0
+        for rank, r in enumerate(enter, 1):
+            if recent_n + fired >= rule["per_hour"]:
+                break
+            v = r["verdict"]
+            if store.db.execute("SELECT 1 FROM alerts WHERE token=? AND mode=? AND rule='edge_enter' AND clock_ts>? LIMIT 1", (r["address"], self.mode, clock - 1800)).fetchone():
+                continue
+            store.db.execute(
+                "INSERT INTO alerts(created_ts, clock_ts, mode, token, symbol, rule, score, inflow, mentions_1h, price, detail) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (int(time.time()), clock, self.mode, r["address"], r["symbol"], "edge_enter", r["score"], r["inflow_10m"], r.get("mentions_1h"), r.get("price_quote"), json.dumps({"rank": rank, "p_2x_30m": v.get("p_2x_30m"), "p_minus50_30m": v.get("p_minus50_30m"), "ev_per_trade_quote": v.get("ev_per_trade_quote"), "size_quote": (v.get("size") or {}).get("quote"), "exit_plan": (v.get("exit_plan") or {}).get("text"), "source": v.get("source"), "sources": r["sources"], "accel": r["accel"], "breadth": r["breadth"], "age_s": r["age_s"], "stage": r["stage"]})),
+            )
+            fired += 1
+            if self.notify:
+                self._notify(f"STAMPEDE · ENTER {r['symbol']}", f"p(2×/30m) {100 * (v.get('p_2x_30m') or 0):.0f}% · size {(v.get('size') or {}).get('quote')} · {r['inflow_10m']} wallets in")
+        return fired
 
     @staticmethod
     def _notify(title: str, text: str) -> None:

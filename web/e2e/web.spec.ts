@@ -232,6 +232,46 @@ test('radar shows the LAUNCH column group and the drawer a Launch section; unkno
   else for (let i = 0; i < Math.min(await page.locator('.radar-row').count(), 5); i++) expect((await page.locator('.radar-row').nth(i).locator('.c-lfarm').textContent())?.trim()).toBe('–')
 })
 
+test('radar shows the VERDICT column and the drawer a Verdict section with the exit plan; ENTER is red, the table still fits', async ({ page }) => {
+  await page.goto('/?view=radar')
+  await page.waitForSelector('.radar-row', { timeout: 20000 })
+  const rows = page.locator('.radar-row')
+  await expect(page.locator('.radar-table th.c-verdict')).toHaveText('verdict')
+  await expect(page.locator('.radar-table th.c-verdict')).toBeVisible()
+  await expect(page.locator('.radar-table th.c-score')).toBeVisible()
+  const list = await page.locator('.radar-list').evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }))
+  expect(list.scroll).toBeLessThanOrEqual(list.client)
+  // every cell: action and p in percent (size and plan are in the tooltip and the drawer); the API row agrees
+  const api = await (await page.request.get('/api/radar?limit=8&preset=under_radar')).json()
+  const byAddr = new Map((api.rows as { address: string; verdict?: { action: string; p_2x_30m: number | null; size?: { quote: number; allowed: boolean } } }[]).map((r) => [r.address, r.verdict]))
+  const cell = /^(ENTER|WAIT|AVOID)( \d+%)?$|^—$/
+  const n = Math.min(await rows.count(), 8)
+  for (let i = 0; i < n; i++) {
+    const text = (await rows.nth(i).locator('.c-verdict').textContent())?.trim()
+    expect(text).toMatch(cell)
+    const title = await rows.nth(i).locator('.c-verdict').getAttribute('title')
+    expect(title).toMatch(/p\(≥2× in 30 min\) \d+% from (model|rules)/)
+    const v = byAddr.get((await rows.nth(i).getAttribute('data-address'))!)
+    if (v === undefined) continue // re-ranked between the two requests
+    expect(text?.startsWith(v.action)).toBeTruthy()
+    const red = await rows.nth(i).locator('.c-verdict').evaluate((el) => getComputedStyle(el).color)
+    if (v.action === 'ENTER') {
+      expect(red).toBe('rgb(255, 51, 68)')
+      expect(title).toMatch(/plan: size \d\.\d{4}/)
+    } else expect(red).not.toBe('rgb(255, 51, 68)')
+  }
+  // the drawer: action, probabilities, size and the plan lines a person can follow
+  await rows.nth(0).click()
+  await expect(page.locator('.coin-drawer h1')).not.toHaveText('Loading…', { timeout: 15000 })
+  await expect(page.locator('.coin-drawer h2', { hasText: /^Verdict/ })).toBeVisible()
+  const section = page.getByTestId('verdict-section')
+  await expect(section).toBeVisible()
+  await expect(section).toContainText(/action(ENTER|WAIT|AVOID)/)
+  await expect(section).toContainText('p ≥ 2× / −50% in 30 min')
+  await expect(section).toContainText(/out after \d+ min whatever the price/)
+  await expect(section).toContainText(/stop at −\d+%/)
+})
+
 test('radar selection is keyed by address, survives polling, moves with the arrows; Enter opens FLOW, Esc returns', async ({ page }) => {
   await page.goto('/?view=radar')
   await page.waitForSelector('.radar-row', { timeout: 20000 })
