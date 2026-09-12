@@ -44,6 +44,13 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
     def store() -> Store:
         return Store(path)
 
+    s0 = store()
+    try:
+        smp0 = queries.sample(s0)
+        sync_lifecycle(s0)  # launches / graduations from lifecycle logs already indexed (before the engine's writer starts: on a
+    finally:  # multi-GB live store this transaction held the write lock for ~30 s while the first batches waited behind it)
+        s0.close()
+
     if mode == "live":
         from ..engine.runner import live_source
 
@@ -51,12 +58,6 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         tail.start()
         state["live"] = tail
 
-    s0 = store()
-    try:
-        smp0 = queries.sample(s0)
-        sync_lifecycle(s0)  # launches / graduations from lifecycle logs already indexed
-    finally:
-        s0.close()
     session = SessionClock(mode, smp0.get("from_ts"), smp0.get("to_ts"), window_s=state["window_s"], span_s=1800, speed=speed)
     state["session"] = session
 

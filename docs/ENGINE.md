@@ -144,7 +144,8 @@ data: {"id":1234,"type":"trade","ts_emit":1789208380.123,"block":61033700,"data"
 | `radar_delta` | after a block that touched rows (`reason: block`), every 5 s of chain time when rows aged (`tick`), every 30 s a full snapshot (`full: true, reason: snapshot`) | `full, reason, clock, window_s, span_s, rows[]` (the `/api/radar` row shape plus `rank, price_spot, reserve_quote, block, updated_ts`), `removed[]` (tokens whose inflow left the span), `top[]` (tokens in rank order, first 50) |
 | `alert` | when the rule fires (`kind: fired`) and when an outcome settles (`kind: outcome`) | fired: `key (token:clock_ts), created_ts, clock_ts, mode, token, symbol, rule, score, inflow, mentions_1h, price, detail {rank, sources, accel, breadth, age_s, stage, mentions_known, engine, block, progress}`; outcome: `key, token, symbol, clock_ts, price, outcome_30m and/or outcome_60m (percent), graduated_after` |
 | `verdict` | when a coin's stage-4 verdict action changes (first time only if it becomes ENTER) | `token, symbol, action (ENTER / WAIT / AVOID), previous, verdict {the stage-4 object: action, p_2x_30m, reasons, plan, size, ...}, score, rank, block, clock`; every `radar_delta` row also carries `verdict` (same batched `radar.attach_verdicts` call as the SQL radar) |
-| `session` | hello at connect (no id), then every 5 s | `mode, label, clock_ts (timestamp of the last processed block = the live clock), head_block, last_block, head_lag_s, paused, feed {endpoint, connected, reconnects, failovers, last_head_age_s, pending_blocks}, blocks_processed, events_per_s, engine, window_s, span_s, server_time`; the hello additionally carries the shared session fields of `/api/session` (`id, rev, ...`) and `last_event_id, replay_from, replay_gap, types, hello` |
+| `position` | the paper ledger (stage 7): `kind: opened` at the fill, `fill` after a partial take-profit, `mark` at most every 5 s of chain time per open position, `closed` with the exit reason, `skipped` when the risk engine refused an ENTER | the position dict of `engine/paper.py` (`id, token, symbol, status, alert_ts/block, opened_ts/block, size_quote, tokens, entry_px, impact_bps, fee/tax/snipe_quote, tax_bps, tax_source, p_2x_30m, ev_quote, plan, peak_px, peak_ret, tp_done, mark_px, mark_quote, unrealized_quote, ret, proceeds_quote, exit_fees_quote, closed_ts, exit_reason, pnl_quote, pnl_usd, hold_s, fills[]`); `skipped`: `token, symbol, clock, block, reason, capped_by` |
+| `session` | hello at connect (no id), then every 5 s | `mode, label, clock_ts (timestamp of the last processed block = the live clock), head_block, last_block, head_lag_s, paused, feed {endpoint, connected, reconnects, failovers, last_head_age_s, pending_blocks}, blocks_processed, events_per_s, engine, window_s, span_s, server_time, lag_ms (smoothed head -> last event latency of live blocks: the number the UIs show after LIVE), paper {open, closed, pending, realized_quote}`; the hello additionally carries the shared session fields of `/api/session` (`id, rev, ...`) and `last_event_id, replay_from, replay_gap, types, hello` |
 
 Amounts are raw integer strings (18 decimals for tokens; the quote's decimals are in `quotes`); prices are floats in
 quote units per token. Symbols are disambiguated like everywhere else (`MARIO·9b72` when several coins share a
@@ -154,7 +155,42 @@ publishes (today: nothing besides the hello and keepalives).
 
 For a web client: `new EventSource('/api/stream')`, handle `radar_delta` (replace rows by `address`, drop `removed`,
 order by `top` or by `rank`), append `trade` / `sequence` to the tape, show `alert`, and use `session` for the LIVE
-label and the lag. For the TUI: the same over `httpx`'s streaming response, one thread, `Last-Event-ID` on reconnect.
+label and the lag. This is what `web/src/live.ts` + `useLive.ts` do (stage 7): the RADAR table folds `radar_delta`
+every 250 ms with the preset applied client-side (`filterLiveRows`, the same semantics as `/api/radar`), SIGNALS
+consumes `alert` and `position`, the strip shows `LIVE · <lag> ms` (the `block_to_emit` p50 of `/api/perf`, polled
+every 10 s) or `LIVE · RECONNECTING`; a hello whose `engine` is not `wss` closes the stream and the views keep polling
+(fixture, replay, `--feed alchemy`). The TUI does the same in `stampede/tui/client.py:StreamReader` (one thread,
+`requests` streaming, `Last-Event-ID` on every reconnect) for `session`, `alert`, `position` and `radar_delta`; the
+FEED keeps polling `/api/events` with its cursor.
+
+## Alerts and the paper ledger (stage 7)
+
+Both alert rules run on the engine path after every block: `under_radar_top5` as before and `edge_enter` (verdict
+ENTER on a ranked row, at most 5 per clock hour ranked by p, one per coin per 30 min, the same parameters as the
+context worker's SQL rule). Rows go to `alerts` with `rule='edge_enter'` and a detail of `p_2x_30m, p_minus50_30m,
+ev_per_trade_quote, size_quote, exit_plan[], source, reasons[], engine: wss, block`; the +30 / +60 outcome loop settles
+them like every other alert. With `--notify` the engine posts the macOS banner itself (`STAMPEDE · ENTER <symbol>`,
+body p / size / plan; `STAMPEDE · <symbol>` for the radar rule), through osascript in its own thread; the context
+worker's SQL alert path is switched off while the engine runs in the process (`worker.alerts_enabled = False`), so a coin
+is never journaled twice behind the worker's write lock.
+
+Every engine `edge_enter` opens a **simulated** position in `engine/paper.py`: size from the risk engine (cap 0.02 ETH,
+3 positions, daily stop; a refused entry is a `position` event of kind `skipped` and stays an alert), filled at the
+reserves of the **next** block (`net = spent − 1 % − creator tax − snipe`, `tokensOut = net·T/(Q+net)`; the creator tax
+is read from the curve's own CurveBuy / CurveSell events, else the launch intel, else 100 bps flagged as estimated; the
+snipe tax applies inside the 3-s window), marked every block by the sell fill of the remaining tokens (`gross =
+tokensIn·Q/(T+tokensIn)`, `out = gross − 1 % − tax`), and closed by the plan of docs/RESEARCH-EDGE.md: sell 50 % at
++100 % then trail 25 % below the high, stop at −30 %, out after 45 min, out when the rotation inflow is 0 after 5 min in
+the trade, the risk engine's exit-now triggers (sell pressure, deployer / exempt selling, liquidity drop measured on the
+ledger's own progress history), and graduation at the observed pool price (median of the last 5 trades) minus 1 % +
+tax. The observed trades are replayed unchanged - our fills never move the reserves anyone else saw. Tables
+`paper_positions`, `paper_fills`, `paper_equity` (created by the module, written through `WriteBatch.sql` in the same
+250-ms transaction as everything else); `GET /api/paper` (positions open / closed / pending, equity curve, stats:
+trades, hit rate, expectancy in quote and USD via `fx_rates`, profit factor, max drawdown of the sequential equity,
+per-hour distribution, bootstrap 95 % CI by coin) and `GET /api/track-record` read the engine's memory in the live
+process and the tables anywhere else; `stampede track-record --db data/live-engine.sqlite --out docs/TRACK-RECORD.md
+--api http://127.0.0.1:PORT` writes the report (alerts by rule with outcomes, paper stats + CI, uptime / gaps / latency
+from `/api/perf`, the snapshot saved next to it). The report and every API response say the fills are simulated.
 
 ## `GET /api/perf`
 
@@ -184,6 +220,15 @@ them (`block_to_emit_backfill`) and fragments separately (`fragment_apply`).
 
 ## Tests
 
+`tests/test_paper.py` (stage 7): the fill at the next block's reserves against `tokensOut = net·T/(Q+net)` by hand
+(fee, the observed creator tax, snipe tax inside 3 s, impact, the first mark below the entry by the round trip), TP then
+trailing stop, stop / time / inflow-dies / exit-now trigger / liquidity drop, graduation at the pool price with 1 % +
+tax, statistics (expectancy, profit factor, drawdown, per-hour, deterministic bootstrap CI by coin), risk caps (fourth
+position, coin already open, daily stop), the engine's `edge_enter` dedupe and per-hour cap, the state end to end (alert
+-> pending -> fill at block N+1 -> persisted -> reloaded by a new state), `/api/paper` + `/api/track-record` + the CLI.
+`tests/test_signals_tui.py`: the SIGNALS screen and the stream against a fake client. `web/e2e/live.spec.ts`: the polling
+fallback on a replay instance and, with `STAMPEDE_LIVE_URL`, the stream on a live engine.
+
 `tests/test_engine.py`: assembly with out-of-order logs, the 250 ms grace and the bloom skip; deferral of transactions
 with incomplete transfers and their late fragment; gap detection, the backfill call (topics, grouping, fork filter) and
 the in-order release; bloom filter without false negatives; reserve reconstruction against `chain.CURVE_*` (a 0.01 ETH
@@ -194,8 +239,16 @@ FastAPI TestClient; `/api/perf` shape. Gate: `env -u NO_COLOR TEXTUAL_COLOR_SYST
 
 ## Known limits
 
-- `/api/status` loads the whole `blocks` table (`queries.sample`); the engine adds ~36k rows per hour, so that
-  endpoint slows on multi-day runs (an index-only bounds query would fix it; not touched in this pass).
+- Fixed after the 60-minute measurement (docs/ENGINE-PERF.md open issues 1, 2 and 4): `context/xmentions.py` commits
+  right after the budget `bump`, so the X pages no longer hold the write lock; `/api/status` reads only the two anchor
+  blocks of the sample; a connection that has been on the failover endpoint for 10 stable minutes reconnects on the
+  preferred one (`Feed.return_after_s`, counted in `feed.returns_to_preferred`; the blocks around the switch go through
+  the ordinary reconnect gap fill). Also: the verdict model runs with `OMP_WAIT_POLICY=PASSIVE` - libomp's default
+  spin-wait after each `predict_proba` kept four threads busy and cost a whole core at ten calls per second.
+- Restarting the engine: send SIGTERM and, if the process is still alive after a few seconds (an open SSE client can
+  hold uvicorn's shutdown), SIGKILL it **before** starting the next one - two engines on one store both assign trade ids
+  (`INSERT OR IGNORE`), and the ~50 s of overlap in the run of 2026-09-12 16:36 UTC left that window's sequences pointing
+  at ids the other process had used.
 - `swap_without_transfer` notes (about 0.2 % of swap transactions) are v4 swaps where the graduated token emits a
   non-standard transfer event or the PoolManager settles through claims: no attribution, same as the batch path.
 - The Robinhood DEX's own v4 pools share the PoolManager: their `Swap` frames are received and dropped

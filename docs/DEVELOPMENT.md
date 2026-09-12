@@ -39,11 +39,11 @@ downloads the bundle from when `data/demo/` has none).
 ## Keys
 
 Terminal: `↑/↓` select, `Enter` open evidence / coin card / wallet card, `Esc` back (filter → summary → table), `Tab`/`Shift+Tab` panes,
-`1`/`2`/`3` FEED / RADAR / TRADERS screens, `/` search, `End`/`Home` follow latest / first row, `u g s a` radar presets,
+`1`/`2`/`3`/`4` FEED / RADAR / TRADERS / SIGNALS screens, `/` search, `End`/`Home` follow latest / first row, `u g s a` radar presets,
 `t m n b` trader presets (top / smart / snipers / bots), `r` refresh coin context, `space` play/pause, `←/→` seek 60 s, `[ ]` speed, `q` or `Ctrl+C` quit.
 
-Web: `1 2 3 4` RADAR / FLOW / MAP / TRADERS, click a row or a ribbon, `D` coin drawer / wallet card, `E` evidence rows, `Esc` back,
-`P` presentation/explore (MAP), `T` tape, `A` autopilot, `space` play/pause. URL parameters: `?view=radar|flow|map|traders`,
+Web: `1 2 3 4 5` RADAR / FLOW / MAP / TRADERS / SIGNALS, click a row or a ribbon, `D` coin drawer / wallet card, `E` evidence rows, `Esc` back,
+`P` presentation/explore (MAP), `T` tape, `A` autopilot, `space` play/pause. URL parameters: `?view=radar|flow|map|traders|signals`,
 `?wallet=0x…` (opens the wallet card), `?layout=presentation`, `?autopilot=1`.
 
 ## API
@@ -53,12 +53,19 @@ Web: `1 2 3 4` RADAR / FLOW / MAP / TRADERS, click a row or a ribbon, `D` coin d
 `has_more`), `/api/radar` (ranked coins, score parts, presets, filters), `/api/coin/{token}` (everything about one coin;
 `?refresh=1` fetches live context), `/api/alerts` (journal + track record), `/api/graph`, `/api/edge/{a}/{b}`,
 `/api/token/{t}`, `/api/search`. The radar score, presets, context modules and the alert rule: `docs/RADAR.md`.
+Stage 6/7 (`docs/ENGINE.md`): `/api/stream` (SSE: block, trade, sequence, radar_delta, alert, verdict, position, session;
+`Last-Event-ID` resume), `/api/perf`, `/api/paper` (the simulated paper ledger: positions, equity, stats with a bootstrap
+CI), `/api/track-record` (alerts + outcomes, paper stats, uptime / gaps); `stampede track-record --db <live store> --out
+docs/TRACK-RECORD.md --api http://127.0.0.1:PORT` writes the report.
 
 ## Tests
 
 - `uv run pytest -q` — 61 tests: chain constants, normalization, rotation, radar score, shared session (TUI + API in
   one process), TUI screens, the demo bundle (export, pack, unpack, boot without keys), one real recorded receipt.
-- `cd web && npx playwright test` — 8 end-to-end tests against a running replay server on :8791 (`playwright.config.ts`).
+- `cd web && npx playwright test` — end-to-end tests against a running replay server on :8791 (`playwright.config.ts`;
+  `STAMPEDE_URL=http://127.0.0.1:PORT` for another instance). `e2e/live.spec.ts` also runs against a live engine when
+  `STAMPEDE_LIVE_URL` points at one (`serve --mode live --feed wss`); without it that test is skipped. Under load the
+  first `/api/radar` of a 2-GB replay store can take 30-40 s: warm it once with curl before the run and use `--workers=1`.
 - Headless Textual renders need `env -u NO_COLOR TEXTUAL_COLOR_SYSTEM=truecolor` in shells that set `NO_COLOR`.
 
 ## Research

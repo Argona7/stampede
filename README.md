@@ -126,7 +126,7 @@ ended below the alert price by the end of the horizon.
 uv sync && uv run pytest -q                     # 61 tests: normalization, rotation, radar, session, TUI, demo bundle
 cd web && npm ci && npm run build && npm run lint
 python scripts/serve_daemon.py start --mode replay   # serves data/stampede.sqlite on :8791 (own recorded store)
-cd web && npx playwright test                   # 8 end-to-end tests against the running server
+cd web && npx playwright test                   # end-to-end tests against the running server (STAMPEDE_URL for another port)
 ```
 
 Record your own sample with a free Alchemy key: `uv run stampede ingest --minutes 60`, `normalize --reset`,

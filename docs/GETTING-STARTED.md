@@ -479,9 +479,10 @@ Verified in the final interface (`Space` and the letters work when no text field
 
 | Key | Where | Action |
 |---|---|---|
-| `1` `2` `3` `4` | everywhere | RADAR / FLOW / MAP / TRADERS |
+| `1` `2` `3` `4` `5` | everywhere | RADAR / FLOW / MAP / TRADERS / SIGNALS (alerts, paper ledger, track record; live mode streams them) |
 | `←` `→` `Home` `End` | view tabs focused | move between the tabs |
 | `↑` `↓` | RADAR, TRADERS | move the coin / wallet selection (the drawer or card follows) |
+| click / double-click | SIGNALS | open the coin drawer for an alert or a paper position / open FLOW |
 | `Enter` | RADAR, TRADERS | open FLOW for the selected coin / the wallet card |
 | `D` | RADAR, FLOW, TRADERS | show / hide the coin drawer / wallet card |
 | `Esc` | everywhere | close the drawer → back to RADAR from FLOW → clear the selection |
