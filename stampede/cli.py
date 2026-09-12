@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--speed", type=float, default=10.0, help="initial replay speed of the shared session clock")
     p.add_argument("--context", default="live", choices=["live", "always", "off"], help="when to fetch external context (X, GeckoTerminal, holders): live mode only (default), always, or never")
     p.add_argument("--notify", action="store_true", help="macOS notification when an alert rule fires")
+    p.add_argument("--feed", default="wss", choices=["wss", "alchemy"], help="live mode source: free websocket engine with SSE at /api/stream (default) or the 2-s Alchemy polling tail")
+    p.add_argument("--db", default=None, help="SQLite store to serve (default: STAMPEDE_DB / data/stampede.sqlite)")
 
     p = sub.add_parser("terminal", help="full-screen terminal UI (TUI) on top of a running API")
     p.add_argument("--api-url", default="http://127.0.0.1:8791")

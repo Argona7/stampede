@@ -36,7 +36,7 @@ def _cached_socials(s: Store, addr: str) -> dict[str, Any] | None:
     return {"twitter": r[0], "telegram": r[1], "website": r[2], "description": r[3], "declared_in": "launch calldata"} if r else None
 
 
-def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = None, speed: float = 10.0, context_policy: str = "live", notify: bool = False) -> FastAPI:
+def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = None, speed: float = 10.0, context_policy: str = "live", notify: bool = False, feed: str = "wss") -> FastAPI:
     app = FastAPI(title="STAMPEDE API", version="0.3.0")
     path = db or db_path()
     state: dict[str, Any] = {"mode": mode, "window_s": parse_window(window), "started": time.time(), "live": None}
@@ -45,7 +45,9 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         return Store(path)
 
     if mode == "live":
-        tail = LiveTail(path, window_s=state["window_s"])
+        from ..engine.runner import live_source
+
+        tail = live_source(path, state, feed) if feed == "wss" else LiveTail(path, window_s=state["window_s"])  # websocket engine (stage 6) or the polling tail
         tail.start()
         state["live"] = tail
 
@@ -130,6 +132,9 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
     worker = ContextWorker(path, clock_now, mode, state["window_s"], 1800, _env("TWITTERAPI_KEY"), _rpc, context_policy=context_policy, notify=notify)
     worker.start()
     state["worker"] = worker
+    from .stream import install as install_stream
+
+    install_stream(app, state)  # GET /api/stream (SSE) + GET /api/perf (stage 6 engine); must precede the SPA catch-all
 
     radar_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
     radar_lock = threading.Lock()
@@ -386,6 +391,6 @@ def _exactify_and_enrich(s: Store, edge_out: dict[str, Any]) -> None:
 def main_serve(args) -> int:
     import uvicorn
 
-    app = create_app(mode=args.mode, window=args.window, speed=getattr(args, "speed", 10.0), context_policy=getattr(args, "context", "live"), notify=bool(getattr(args, "notify", False)))
+    app = create_app(mode=args.mode, window=args.window, db=Path(getattr(args, "db", None)) if getattr(args, "db", None) else None, speed=getattr(args, "speed", 10.0), context_policy=getattr(args, "context", "live"), notify=bool(getattr(args, "notify", False)), feed=getattr(args, "feed", "wss"))
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     return 0

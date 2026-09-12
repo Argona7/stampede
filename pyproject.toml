@@ -12,6 +12,7 @@ dependencies = [
     "textual>=8.2.8",
     "hypersync>=1.2.1",
     "pillow>=10",
+    "websockets>=17.1",
 ]
 
 [project.scripts]
