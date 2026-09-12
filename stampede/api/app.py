@@ -22,6 +22,7 @@ from ..context.pons import launch_socials, sync_lifecycle
 from ..context.xmentions import XMentions
 from . import queries
 from . import radar as radar_mod
+from . import traders_api
 from .context_worker import ContextWorker, load_context
 from .live import LiveTail
 from .session import SessionClock, SessionError
@@ -292,6 +293,35 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         s = store()
         try:
             return queries.search(s, q)
+        finally:
+            s.close()
+
+    # ---- traders (stage 2): wallet_stats / wallet_positions written by `stampede traders` ----
+    @app.get("/api/traders")
+    def get_traders(preset: str | None = "top", limit: int = 50, min_trades: int = 5, min_roi: float | None = None, min_win_rate: float | None = None, active_within_s: int | None = None, clock: int | None = None, sort: str | None = None) -> dict[str, Any]:
+        s = store()
+        try:
+            st = session_state()
+            ref = clock if clock is not None else (st["clock_ts"] if st["clock_ts"] is not None else None)
+            out = traders_api.leaderboard(s, preset, limit, min_trades, min_roi, min_win_rate, active_within_s, ref, sort)
+            out["session"] = st
+            return out
+        finally:
+            s.close()
+
+    @app.get("/api/traders/lookup")
+    def get_traders_lookup(wallets: str = "") -> dict[str, Any]:
+        s = store()
+        try:
+            return traders_api.lookup(s, [w for w in wallets.split(",") if w.strip()])
+        finally:
+            s.close()
+
+    @app.get("/api/wallet/{addr}")
+    def get_wallet(addr: str, clock: int | None = None) -> dict[str, Any]:
+        s = store()
+        try:
+            return traders_api.wallet_card(s, addr, clock)
         finally:
             s.close()
 

@@ -14,6 +14,7 @@ from ..context import pons
 from ..context.market import curve_stats
 from ..store import Store
 from . import queries
+from . import traders_api
 
 MAIN = ("direct", "clean")
 PRESETS: dict[str, dict[str, Any]] = {
@@ -33,7 +34,9 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
 SCORE_NOTES = "inflow lift rises through 20-39 wallets in 10 min and drops at 40+; a fresh burst (accel >= 4), breadth and age < 1 h carry lift; wallets whose past rotations preceded runners roughly double the rate. Momentum is shown, not scored. Source: docs/RESEARCH-RUNNERS.md."
 
 
-def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str, chg_10m: float | None = None) -> dict[str, Any]:
+def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, mentions_1h: int | None, age_s: int | None, stage: str, chg_10m: float | None = None, smart_inflow: int | None = None) -> dict[str, Any]:
+    # smart inflow (stage 2, docs/RESEARCH-TRADERS.md): top-decile wallets by FIFO quality among the inflow wallets; +3 per wallet, capped at +9
+    s_smart = min(1.0, smart_inflow / 3) if smart_inflow else 0.0
     # inflow: measured lift rises through 20-39 wallets and drops at 40+ (docs/RESEARCH-RUNNERS.md)
     if inflow_10m <= 20:
         s_inflow = inflow_10m / 20
@@ -55,10 +58,12 @@ def score(inflow_10m: int, accel: float, breadth: int, quality: float | None, me
         age_bonus = -0.12
     stage_bonus = 0.05 if stage == "curve" else 0.0
     crowded = 0.0  # momentum is shown as a column, not scored: continuation and late entry are different bets
-    total = 100 * _clamp(0.36 * s_inflow + 0.24 * s_accel + 0.12 * s_breadth + 0.18 * s_quality + age_bonus + stage_bonus + crowded - attention)
+    total = 100 * _clamp(0.36 * s_inflow + 0.24 * s_accel + 0.12 * s_breadth + 0.18 * s_quality + age_bonus + stage_bonus + crowded - attention + 0.09 * s_smart)
     return {
         "score": round(total, 1),
         "parts": {
+            "smart_inflow": round(9 * s_smart, 1),
+            "smart_known": smart_inflow is not None,
             "inflow": round(36 * s_inflow, 1),
             "acceleration": round(24 * s_accel, 1),
             "breadth": round(12 * s_breadth, 1),
@@ -208,7 +213,8 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
         mentions = (ctx.get("mentions") or {}).get(tok)
         m1h = mentions.get("mentions_1h") if mentions else None
         cs = stats_from_rows(hour_trades.get(tok, []), clock, qdec)
-        sc = score(inflow10, accel, breadth, quality, m1h, age_s, st, cs.get("chg_10m"))
+        smart = traders_api.smart_inflow(store, d["w10"])  # stage 2: top-decile traders among the inflow wallets; None without wallet_stats
+        sc = score(inflow10, accel, breadth, quality, m1h, age_s, st, cs.get("chg_10m"), smart_inflow=smart["count"] if smart else None)
         row = {
             **labels[tok],
             "inflow_10m": inflow10,
@@ -235,6 +241,7 @@ def compute_rows(store: Store, window_s: int, clock: int, span_s: int = 1800, ex
         row["chg_10m"] = cs.get("chg_10m")
         row["quote_symbol"] = qsym.get(cs["quote"] or "", None)
         row["chg_5m"] = cs["chg_5m"]
+        row["smart_inflow"] = smart
         row["chg_1h"] = cs["chg_1h"]
         row["vol_1h_quote"] = cs["vol_1h_quote"]
         row["buyers_1h"] = cs["buyers_1h"]

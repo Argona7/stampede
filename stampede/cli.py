@@ -73,6 +73,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default=None)
     p.add_argument("--days", type=float, default=14.0)
 
+    from .research.traders import build_parser as _traders_parser
+
+    _traders_parser(sub.add_parser("traders", help="FIFO ledgers with fees, wallet quality, walk-forward and copy-test -> wallet_stats / wallet_positions + docs/RESEARCH-TRADERS.md"))
+
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8791)
@@ -128,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
         from .context.fx import main_fx
 
         return main_fx(args)
+    if args.cmd == "traders":
+        from .research.traders import main_traders
+
+        return main_traders(args)
     if args.cmd == "backfill":
         from .research.backfill import main_backfill
 
