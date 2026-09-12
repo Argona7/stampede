@@ -135,12 +135,14 @@ class WriteBatch:
     token_meta: list[tuple] = field(default_factory=list)  # (symbol, name, address)
     wallets: Counter = field(default_factory=Counter)
     meta: dict[str, Any] = field(default_factory=dict)
+    created: float = field(default_factory=time.time)
 
     def extend(self, o: "WriteBatch") -> None:
         for k in ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "token_meta"):
             getattr(self, k).extend(getattr(o, k))
         self.wallets.update(o.wallets)
         self.meta.update(o.meta)
+        self.created = min(self.created, o.created)
 
     def rows(self) -> int:
         return sum(len(getattr(self, k)) for k in ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "token_meta")) + len(self.wallets)

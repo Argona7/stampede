@@ -66,7 +66,7 @@ class Writer(threading.Thread):
         self.q: queue.Queue[WriteBatch] = queue.Queue()
         self._stop = threading.Event()
         self.hist = Histogram()
-        self.stats: dict[str, Any] = {"flushes": 0, "rows": 0, "errors": 0, "last_error": None, "last_flush_ms": None, "pending_batches": 0, "by_table": Counter()}
+        self.stats: dict[str, Any] = {"flushes": 0, "rows": 0, "errors": 0, "last_error": None, "last_flush_ms": None, "pending_batches": 0, "lag_s": 0.0, "max_lag_s": 0.0, "dropped_batches": 0, "by_table": Counter()}
 
     def enqueue(self, wb: WriteBatch) -> None:
         if wb.rows():
@@ -76,13 +76,18 @@ class Writer(threading.Thread):
         self._stop.set()
 
     def run(self) -> None:
+        import sqlite3
+
         store = Store(self.db_path)
-        store.db.execute("PRAGMA busy_timeout=5000")
+        # other writers in the API process hold the lock for seconds at a time (the context worker keeps a write open
+        # across X API calls); a batch is never dropped for that - it waits, and the lag is reported
+        store.db.execute("PRAGMA busy_timeout=30000")
         last_ckpt = time.time()
         while not (self._stop.is_set() and self.q.empty()):
             try:
                 first = self.q.get(timeout=self.interval)
             except queue.Empty:
+                self.stats["lag_s"] = 0.0
                 continue
             if time.time() - last_ckpt > 60:
                 # the API's long readers (radar SQL, /api/status) starve the automatic checkpoint; a passive one now and
@@ -101,8 +106,11 @@ class Writer(threading.Thread):
                 except queue.Empty:
                     break
             self.stats["pending_batches"] = self.q.qsize()
+            self.stats["lag_s"] = round(time.time() - first.created, 2)
+            self.stats["max_lag_s"] = max(self.stats.get("max_lag_s", 0.0), self.stats["lag_s"])
             t0 = time.perf_counter()
-            for attempt in range(3):
+            attempt = 0
+            while True:
                 try:
                     self.flush(store, batch)
                     break
@@ -113,7 +121,14 @@ class Writer(threading.Thread):
                         store.db.rollback()
                     except Exception:  # noqa: BLE001
                         pass
-                    time.sleep(0.2 * (attempt + 1))
+                    locked = isinstance(e, sqlite3.OperationalError) and ("locked" in str(e) or "busy" in str(e))
+                    attempt += 1
+                    if not locked and attempt >= 3:
+                        self.stats["dropped_batches"] = self.stats.get("dropped_batches", 0) + 1
+                        break  # a real error (schema, disk): do not loop forever on the same rows
+                    if self._stop.is_set() and attempt >= 10:
+                        break
+                    time.sleep(min(2.0, 0.1 * (2**min(attempt, 5))))
             ms = (time.perf_counter() - t0) * 1000
             self.hist.add(ms)
             self.stats["flushes"] += 1
@@ -350,6 +365,7 @@ class Engine:
             "feed": self.status["feed"],
             "blocks_processed": self.counts["blocks"],
             "events_per_s": self.bus.events_per_s(10),
+            "writer": {"lag_s": self.writer.stats.get("lag_s"), "pending_batches": self.writer.stats.get("pending_batches"), "errors": self.writer.stats.get("errors")} if self.writer else None,
             "engine": "wss",
             "window_s": st.window_s if st else self.window_s,
             "span_s": st.span_s if st else self.span_s,
