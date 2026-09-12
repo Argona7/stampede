@@ -92,6 +92,13 @@ def test_entry_fills_at_the_next_blocks_reserves_against_the_hand_formula():
     ev2 = run_block(L2, 2001, 11, {"0xcurve": rs2}, launches={TOKEN_B: {"ts": 2000}})
     p2 = next(iter(L2.open.values()))
     assert ev2[0]["kind"] == "opened" and p2.tax_source == "launch intel" and p2.tax_bps == 300 and p2.snipe_wei == SIZE * 618 // 10_000  # 618 bps at 1 s
+    # the size is the risk engine's from the coin's features: a 60 % 5-min range halves the 0.02 cap, and the verdict's own
+    # (smaller) size is never exceeded
+    L4 = ledger()
+    L4.on_enter(TOKEN_A, "AAA", CURVE_A, ENTER_VERDICT, {"range_5m": 0.6}, clock=1, block=1)
+    assert L4.pending[0].size_wei == 10**16
+    L4.on_enter(TOKEN_B, "BBB", "0xcb", {**ENTER_VERDICT, "size": {"quote": 0.0155, "allowed": True}}, {}, clock=1, block=1)
+    assert L4.pending[1].size_wei == 155 * 10**14
     # an unknown reserve (snapshot pending) or a non-ETH pair never fills silently
     L3 = ledger()
     L3.on_enter(TOKEN_C, "CCC", "0xc", ENTER_VERDICT, {}, clock=1, block=1)

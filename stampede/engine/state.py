@@ -480,12 +480,14 @@ class EngineState:
         rank_of = {r["address"]: i for i, r in enumerate(self.ranked, 1)}
         for r in self.rows.values():
             r["rank"] = rank_of.get(r["address"])
+        vf_all: dict[str, dict[str, Any]] = {}
         if self.paper is not None and need_verdict:
-            tracked = self.paper.tracked_tokens()
-            if tracked:  # the exit-now triggers of open paper positions read the same feature dict the verdict consumes
-                for r in need_verdict:
-                    if r["address"] in tracked and r.get("_vf"):
-                        self.paper.features[r["address"]] = dict(r["_vf"])
+            # the same feature dicts the verdict consumes (attach_verdicts pops the key, the objects stay referenced here):
+            # the ledger sizes an entry from them (range_5m) and reads the exit-now triggers of its open positions from them
+            vf_all = {r["address"]: r["_vf"] for r in need_verdict if r.get("_vf")}
+            for tok in self.paper.tracked_tokens():
+                if tok in vf_all:
+                    self.paper.features[tok] = vf_all[tok]
         verdict_changes = self._attach_verdicts(need_verdict, block.number, clock)
         t_radar = time.time()
         # 6. alerts (+ the paper ledger: entries at the next block, marks and exits every block)
@@ -498,7 +500,7 @@ class EngineState:
                         la = self.launches.get(a["token"]) or {}
                         row = self.rows.get(a["token"]) or {}
                         li = row.get("launch") or {}
-                        ev = self.paper.on_enter(a["token"], a["symbol"], la.get("curve"), row.get("verdict") or {}, self.paper.features.get(a["token"]), clock, block.number, tax_hint=li.get("creator_tax_bps"))
+                        ev = self.paper.on_enter(a["token"], a["symbol"], la.get("curve"), row.get("verdict") or {}, vf_all.get(a["token"]) or self.paper.features.get(a["token"]), clock, block.number, tax_hint=li.get("creator_tax_bps"))
                         if ev:
                             paper_events.append(ev)
                 paper_events.extend(self.paper.on_block(clock, block.number, self.reserves, self.rows, self.launches, self.graduations, self.price_now, lambda t: self.label(t)["symbol"], wb, is_fragment=block.is_fragment))

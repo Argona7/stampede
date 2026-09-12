@@ -416,7 +416,11 @@ class PaperLedger:
         if not sz["allowed"] or not sz["quote"]:
             self.stats["skipped_by_risk"] += 1
             return {"kind": "skipped", "token": token, "symbol": symbol, "clock": clock, "block": block, "reason": "; ".join(sz.get("reasons") or ["risk engine: no size"]), "capped_by": sz.get("capped_by")}
-        self.pending.append(PendingEntry(token, symbol, curve, clock, block, int(round(sz["quote"] * WEI)), verdict, dict(f), tax_hint))
+        quote = float(sz["quote"])
+        vq = (verdict.get("size") or {}).get("quote")
+        if vq:  # never larger than the size the alert showed (same inputs; the verdict may have seen a wider 5-min range)
+            quote = min(quote, float(vq))
+        self.pending.append(PendingEntry(token, symbol, curve, clock, block, int(round(quote * WEI)), verdict, dict(f), tax_hint))
         self.features[token] = dict(f)
         self.stats["queued"] += 1
         return None
