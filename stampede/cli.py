@@ -71,6 +71,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-resume", action="store_true", help="ignore the stored cursor and start over")
     p.add_argument("--rotate", action="store_true", help="compute 5 min and 30 min sequences when the trades pass is done")
 
+    p = sub.add_parser("backfill-rpc", help="the same research rows as `backfill`, fetched from free public JSON-RPC endpoints (no HyperSync token); resumes the same cursor")
+    p.add_argument("--db", required=True)
+    p.add_argument("--from-block", type=int, required=True)
+    p.add_argument("--to-block", type=int, required=True)
+    p.add_argument("--endpoints", nargs="*", default=None, help="endpoint names (blockmachine ordofi official nodeflare pocket) or URLs; default: blockmachine ordofi official (docs/BACKFILL.md)")
+    p.add_argument("--chunk", type=int, default=10_000, help="blocks per chunk (two getLogs each); endpoints with a smaller span split it")
+    p.add_argument("--workers", type=int, default=3, help="chunks in flight (threads); the store is written in block order by the main thread")
+    p.add_argument("--label", default=None)
+    p.add_argument("--no-resume", action="store_true", help="ignore the stored cursor and start over")
+    p.add_argument("--no-alchemy-headers", action="store_true", help="do not use ALCHEMY_KEY for the header fallback; batch headers through the pool instead")
+    p.add_argument("--no-seed-infra", action="store_true", help="do not seed chain.KNOWN_INFRA into `infra` (reproduces the rows of stores backfilled before the seed existed; equivalence checks only)")
+    p.add_argument("--pacer-dir", default="/tmp/stampede-rpc-pacer", help="directory of the cross-process pacing files (segment workers on one IP share every endpoint quota); '' disables")
+
     p = sub.add_parser("launch-intel", help="per-launch quality features (dev buy, bundle, creator tax, deployer record, launch farm, snipe-tax zero time) into launch_intel + runner-rate report")
     p.add_argument("--db", required=True, help="store to read and to write launch_intel into")
     p.add_argument("--out", default="", help="markdown report path (default: stdout)")
@@ -162,6 +175,10 @@ def main(argv: list[str] | None = None) -> int:
         from .research.backfill import main_backfill
 
         return main_backfill(args)
+    if args.cmd == "backfill-rpc":
+        from .research.backfill_rpc import main_backfill_rpc
+
+        return main_backfill_rpc(args)
     if args.cmd == "edge-features":
         from .research.features import build
 

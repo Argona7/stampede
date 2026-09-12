@@ -88,10 +88,20 @@ def pool_row(pr: dict[str, Any]) -> tuple:
     return (pr["topic1"], c0, c1, 0, 200, chain.PONS_V2_HOOK, pr["block"], pr["tx_hash"])
 
 
-def apply_lifecycle(store: Store, logs: list[dict[str, Any]]) -> Counter:
+def seed_infra(store: Store) -> int:
+    """`chain.KNOWN_INFRA` into `infra`, as the live ingest does. `build_context` reads it; without these rows the v4
+    PoolManager and the hook are attributed as wallets on every v4 trade (39% of the rows of the first 14-day HyperSync
+    store, all v4 rows with quote_amount 0 and flagged two_sided_tx). Returns the number of rows added."""
+    before = store.db.execute("SELECT COUNT(*) FROM infra").fetchone()[0]
+    store.upsert_infra((a, k, "chain.KNOWN_INFRA") for a, k in chain.KNOWN_INFRA.items())
+    store.commit()
+    return store.db.execute("SELECT COUNT(*) FROM infra").fetchone()[0] - before
+
+
+def apply_lifecycle(store: Store, logs: list[dict[str, Any]], source: str = "hypersync") -> Counter:
     """Write lifecycle logs and derive curves / tokens / pools from them."""
     c: Counter = Counter()
-    store.insert_logs((l["tx_hash"], l["log_index"], l["block"], l["address"], l["topic0"], l["topic1"], l["topic2"], l["topic3"], l["data"], l["kind"], "hypersync") for l in logs)
+    store.insert_logs((l["tx_hash"], l["log_index"], l["block"], l["address"], l["topic0"], l["topic1"], l["topic2"], l["topic3"], l["data"], l["kind"], source) for l in logs)
     curves, tokens, pools = [], [], []
     for l in logs:
         if l["kind"] == "token_launched" and l["address"] == chain.PONS_V2_FACTORY and l["topic1"] and l["topic2"]:
@@ -268,7 +278,7 @@ def make_client(hs_module: Any, token: str | None = None) -> Any:
 async def run(store: Store, fr: int, to: int, hs_module: Any, resume: bool = True, progress=print) -> dict[str, Any]:
     client = make_client(hs_module)
     bf = Backfill(store, client, hs_module, progress=progress, client_factory=lambda: make_client(hs_module))
-    out: dict[str, Any] = {"from_block": fr, "to_block": to}
+    out: dict[str, Any] = {"from_block": fr, "to_block": to, "infra_seeded": seed_infra(store)}
     lc = store.get_meta("backfill_lifecycle_cursor")
     lifecycle_from = max(0, fr - int(LIFECYCLE_LOOKBACK_DAYS * 86400 * BLOCKS_PER_SECOND))
     if not (resume and lc and int(lc) > to):
