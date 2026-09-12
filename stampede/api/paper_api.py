@@ -38,6 +38,8 @@ def install(app: FastAPI, state: dict[str, Any], store_factory: Callable[[], Sto
 
     @app.get("/api/track-record")
     def get_track_record(since: int | None = None, alerts_limit: int = 200) -> dict[str, Any]:
+        """The whole journal of this mode by default (`since=0`); `since=<unix ts>` narrows it (the CLI defaults to the
+        latest engine start instead, so a restart does not empty the panel a person is looking at)."""
         from .. import track_record
 
         live = state.get("live")
@@ -45,6 +47,6 @@ def install(app: FastAPI, state: dict[str, Any], store_factory: Callable[[], Sto
         st = engine_state()
         s = store_factory()
         try:
-            return track_record.build(s, since_ts=since, perf=perf, paper=st.paper.snapshot(st.clock or None, closed_limit=2000) if st is not None else None, mode=state.get("mode") or "live", alerts_limit=alerts_limit)
+            return track_record.build(s, since_ts=since if since is not None else 0, perf=perf, paper=st.paper.snapshot(st.clock or None, closed_limit=2000) if st is not None else None, mode=state.get("mode") or "live", alerts_limit=alerts_limit)
         finally:
             s.close()
