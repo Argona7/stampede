@@ -31,6 +31,9 @@ from ..store import Store
 
 BLOCKS_PER_SECOND = 10.0  # measured ~100 ms blocks; only used to turn --days into a block span before the first query
 POOL_ID_BATCH = 400  # poolIds per topic1 filter list (several LogSelections are OR-ed inside one query)
+# Curves and graduated pools keep trading long after their launch: the lifecycle pass starts this many days before the
+# trades range so those venues are known (smoke test without it: 2,752 curve events unresolved, 0 v4 trades in 10 min).
+LIFECYCLE_LOOKBACK_DAYS = 30.0
 
 
 def _hex_int(v: Any) -> int:
@@ -243,8 +246,10 @@ async def run(store: Store, fr: int, to: int, hs_module: Any, resume: bool = Tru
     bf = Backfill(store, client, hs_module, progress=progress)
     out: dict[str, Any] = {"from_block": fr, "to_block": to}
     lc = store.get_meta("backfill_lifecycle_cursor")
+    lifecycle_from = max(0, fr - int(LIFECYCLE_LOOKBACK_DAYS * 86400 * BLOCKS_PER_SECOND))
     if not (resume and lc and int(lc) > to):
-        out["lifecycle"] = dict(await bf.lifecycle(fr, to))
+        out["lifecycle_from_block"] = lifecycle_from
+        out["lifecycle"] = dict(await bf.lifecycle(lifecycle_from, to))
         from ..context.pons import sync_lifecycle
 
         out["sync_lifecycle"] = sync_lifecycle(store)
@@ -267,6 +272,8 @@ def main_backfill(args) -> int:
     import hypersync as hs
 
     store = Store(Path(args.db) if args.db else None)
+    store.db.execute("PRAGMA synchronous=OFF")  # research store: resumable via the cursor, so fsync per commit buys nothing
+    store.db.execute("PRAGMA cache_size=-262144")  # 256 MB page cache
     client = make_client(hs)
     head = asyncio.run(client.get_height())
     to = int(args.to_block) if args.to_block else head - 100

@@ -145,7 +145,8 @@ def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> 
             events[p["token"]].append(l | {"_quote": p["quote"], "_venue": "v4", "_c0": p["currency0"]})
     if not events:
         return [], notes
-    exclude = ctx.infra | set(events)
+    # membership checks against the (possibly very large) infra set; never copy it per transaction
+    infra, event_tokens = ctx.infra, set(events)
     out: list[Trade] = []
     for token, evs in events.items():
         delta: dict[str, int] = defaultdict(int)
@@ -164,10 +165,10 @@ def trades_from_tx(tx_hash: str, block: int, logs: list[dict], ctx: Context) -> 
         if n_tr == 0:
             notes.append((token, "swap_without_transfer", ""))
             continue
-        passthrough = {a for a, d in delta.items() if d == 0 and gross[a] > 0 and a not in exclude}
+        passthrough = {a for a, d in delta.items() if d == 0 and gross[a] > 0 and a not in infra and a not in event_tokens}
         for a in passthrough:
             ctx.passthrough[a] += 1
-        cand = {a: d for a, d in delta.items() if d != 0 and a not in exclude and a not in passthrough}
+        cand = {a: d for a, d in delta.items() if d != 0 and a not in infra and a not in event_tokens and a not in passthrough}
         pos = {a: d for a, d in cand.items() if d > 0}
         neg = {a: -d for a, d in cand.items() if d < 0}
         # quote amounts and venue from the events

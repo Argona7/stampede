@@ -66,7 +66,7 @@ class HyperSync:
                 "field_selection": sel,
             }
             if join_tx:
-                body["join_mode"] = "JoinTransactions"
+                body["join_mode"] = "Default"  # logs → their transactions and blocks
             res = self.query_once(body)
             for batch in res.get("data", []):
                 logs.extend(batch.get("logs", []))
@@ -92,7 +92,7 @@ class HyperSync:
         try:
             h = out["height"]
             t0 = time.time()
-            res = self.query_once({"from_block": h - 30, "to_block": h, "logs": [{"topics": [[chain.T_CURVE_BUY]]}], "field_selection": {"log": ["block_number", "transaction_hash"], "transaction": ["from"], "block": ["timestamp"]}, "join_mode": "JoinTransactions"})
+            res = self.query_once({"from_block": h - 30, "to_block": h, "logs": [{"topics": [[chain.T_CURVE_BUY]]}], "field_selection": {"log": ["block_number", "transaction_hash"], "transaction": ["from"], "block": ["timestamp"]}, "join_mode": "Default"})
             n = sum(len(b.get("logs", [])) for b in res.get("data", []))
             out["query_ok"] = True
             out["query_ms"] = round((time.time() - t0) * 1000)
