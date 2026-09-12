@@ -1,6 +1,6 @@
 # Trader intelligence: who earns on PONS after fees, and does it persist?
 
-Generated 2026-09-12 10:34 UTC by `stampede traders` from `data/research-12h.sqlite`.
+Generated 2026-09-12 10:41 UTC by `stampede traders` from `data/research-12h.sqlite`.
 
 > Dry run on the 5-hour research store (data/research-12h.sqlite, normalized before the fee columns existed: the 1% base fee is applied by rule, creator and snipe tax are unknown, so PnL is slightly optimistic and sniper flags rest on launch times alone). The 14-day store with real fee columns replaces this report when its backfill is READY; the smoke store with real fees (10 min, 15.6k trades) reproduces the same pipeline: 4,365 wallets, 991 closed positions, 3 bots, 103 deployer-linked, 141 snipers.
 
@@ -11,13 +11,13 @@ Generated 2026-09-12 10:34 UTC by `stampede traders` from `data/research-12h.sql
 - USD: no fx_rates in this store: USD columns are n/a (run `stampede fx --db ...`). PnL is stated in quote units first; the ETH columns cover positions quoted in native ETH/WETH (41,579 wallets); other quote assets are kept per asset in `pnl_by_quote`.
 - Wallets tagged: 160 bots (> 60 trades/h over their active span, > 500 trades, or ≥ 3 blocks with buys of several coins), 1,560 deployer-linked (deployer of a coin they traded, or bought without snipe tax while later buyers still paid it: 0), 2,401 snipers (≥ 30% of entries under 3 s after launch or with snipe tax paid).
 - Positions: 119,939 closed (wallet, coin) episodes; a position closes when ≤ 1% of its peak inventory is left (the dust is written off). Sells without matching lots (tokens received by transfer, or bought before the range) are ignored, never counted as profit.
-- Compute: token pass 1.8 s, wallet pass 7.4 s, total 251 s.
+- Compute: token pass 2.5 s, wallet pass 7.6 s, total 13 s.
 
 ## Definitions
 
 - **Cost of a lot** = quote paid + 1% fee (incl. snipe tax) + creator tax. **Proceeds** = net quote received. **Realized PnL** = FIFO proceeds − matched cost. **Unrealized** = open inventory × last minute-median price − remaining cost. **ROI** = (realized + unrealized) / total cost of buys; `roi_realized` = realized / cost of the lots actually sold.
 - **Win rate** = closed positions with PnL > 0 / closed positions. **Median hold** = median(last sell − first buy) over closed positions. **Trades/hour** over the wallet's active span (≥ 1 h).
-- **Buyer rank** = n-th distinct buyer of the coin since its launch (known only when the launch is inside the range). **Sniper** = entry < 3 s after launch or snipe tax paid. **Exit quality** = exit price / max minute-median price in the following 15 min (1 = sold the top), proceeds-weighted per position. **Rug avoidance** = share of closed positions after which the coin fell ≥ 80% within 60 min. **Consistency** = share of active ISO weeks with positive realized PnL.
+- **Buyer rank** = n-th distinct buyer of the coin since its launch (known only when the launch is inside the range). **Sniper** = entry < 3 s after launch or snipe tax paid. **Exit quality** = exit price / max minute-median price in the following 15 min (1 = sold the top), proceeds-weighted per position. **Rug avoidance** = share of closed positions after which the coin fell ≥ 80% within 60 min. **Consistency** = share of the wallet's active weeks (7-day buckets of the Unix epoch) with positive realized ETH PnL. Exit-quality and rug horizons use trades after the exit, so the first-half stats near the split see up to 15 / 60 min of second-half prices.
 - **Quality** (0–1, 0.5 = no evidence) = shrink × (0.35 × Laplace win rate + 0.25 × clip((roi_realized + 1)/2) + 0.2 × exit quality + 0.2 × rug avoidance) + (1 − shrink) × 0.5, shrink = n / (n + 5) over n closed positions. Bots and deployer-linked wallets keep their quality but are excluded from the `smart` preset and from the walk-forward top lists.
 
 ## Population
