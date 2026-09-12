@@ -504,6 +504,7 @@ class Engine:
                     st.mentions = load_context(store, "mentions", toks)
                     st.context["market"] = load_context(store, "market", toks)
                     st.context["holders"] = load_context(store, "holders", toks)
+                st.load_radar_inputs(store, toks)
                 clock = st.clock
                 t0 = time.perf_counter()
                 sql_rows = {r["address"]: r for r in radar_mod.compute_rows(store, st.window_s, clock, st.span_s, True, {"mentions": st.mentions})}

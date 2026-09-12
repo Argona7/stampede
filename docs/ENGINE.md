@@ -80,9 +80,11 @@ Every released block carries `t_first_seen`, `t_head_received`, `t_logs_complete
 - Rolling per-coin windows: main-grade sequences (span, 30 min) -> distinct inflow wallets in 10 min, previous rate,
   acceleration, breadth of source coins, minute histogram; trades (1 h) -> the same `radar.stats_from_rows` numbers as
   the SQL radar (median price of the last 5 trades, 5 m / 10 m / 1 h change, volume, buyers). Rows use `radar.score()`
-  unchanged; every 5 s of chain time all rows are recomputed and expired ones removed; every 30 s the memory rows are
-  reconciled against `radar.compute_rows` on the store (`/api/perf` -> `radar_reconcile`: rows in both, inflow
-  mismatches, top-5 of each).
+  unchanged, including the stage-2 `smart_inflow` part (top-decile traders from `traders_api.smart_set`, refreshed
+  every 30 s) and the stage-3 `launch` object (`launch_intel.intel_for`, same cadence; `None` for coins without a row);
+  every 5 s of chain time all rows are recomputed and expired ones removed; every 30 s the memory rows are reconciled
+  against `radar.compute_rows` on the store (`/api/perf` -> `radar_reconcile`: rows in both, inflow mismatches, top-5
+  of each).
 - Trade ids are assigned by the engine (`INSERT OR IGNORE INTO trades(id, ...)`), so `sequences.sell_trade/buy_trade`
   and the `trade` events agree with the database before the writer has flushed.
 - Alerts: the `under_radar_top5` rule of `api/context_worker.py` (same parameters: rank <= 5, score >= 60, inflow

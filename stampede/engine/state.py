@@ -195,6 +195,11 @@ class EngineState:
         self.reserves: dict[str, CurveReserve] = {}
         self.mentions: dict[str, dict[str, Any]] = {}
         self.context: dict[str, dict[str, Any]] = {"market": {}, "holders": {}}
+        # stage 2 / stage 3 inputs of the radar row, refreshed every 30 s by the engine (SQL, never on the block path)
+        self.smart: dict[str, float] = {}
+        self.smart_thr: float | None = None
+        self.intel: dict[str, dict[str, Any]] = {}
+        self.load_radar_inputs(store, [])
         # ---- rolling state ----
         r = store.db.execute("SELECT MAX(id) FROM trades").fetchone()
         self.next_trade_id = int(r[0] or 0) + 1
@@ -253,6 +258,23 @@ class EngineState:
     def label(self, token: str) -> dict[str, Any]:
         sym, name = self.labels.get(token, ("?", ""))
         return {"address": token, "symbol": f"{sym}·{token[-4:]}" if self.symbol_count.get(sym, 0) > 1 else sym, "symbol_raw": sym, "name": name, "short": short(token), "source": "engine", "ambiguous_symbol": self.symbol_count.get(sym, 0) > 1}
+
+    def load_radar_inputs(self, store: Store, tokens: list[str]) -> None:
+        """Top-decile traders (`traders_api.smart_set`) and launch intel (`launch_intel.intel_for`) for the rows; both
+        are optional tables of other stages, so their absence just leaves the parts unknown."""
+        try:
+            from ..api import traders_api
+
+            self.smart, self.smart_thr = traders_api.smart_set(store)
+        except Exception:  # noqa: BLE001
+            self.smart, self.smart_thr = {}, None
+        if tokens:
+            try:
+                from ..context import launch_intel
+
+                self.intel = launch_intel.intel_for(store, tokens)
+            except Exception:  # noqa: BLE001
+                self.intel = {}
 
     def load_alerts(self, store: Store) -> None:
         now = int(time.time())
@@ -599,7 +621,14 @@ class EngineState:
         mentions = self.mentions.get(tok)
         m1h = mentions.get("mentions_1h") if mentions else None
         cs = self._stats(tok, clock)
-        sc = radar_mod.score(inflow10, accel, breadth, quality, m1h, age_s, stage, cs.get("chg_10m"))
+        smart = None
+        if self.smart:
+            hits = [self.smart[w] for w in w10 if w in self.smart]
+            smart = {"count": len(hits), "mean_quality": round(sum(hits) / len(hits), 3) if hits else None, "threshold": self.smart_thr}
+        try:
+            sc = radar_mod.score(inflow10, accel, breadth, quality, m1h, age_s, stage, cs.get("chg_10m"), smart_inflow=smart["count"] if smart else None)
+        except TypeError:  # an older radar.score without the stage-2 part
+            sc = radar_mod.score(inflow10, accel, breadth, quality, m1h, age_s, stage, cs.get("chg_10m"))
         row = {
             **self.label(tok),
             "inflow_10m": inflow10,
@@ -625,9 +654,11 @@ class EngineState:
             "chg_10m": cs.get("chg_10m"),
             "quote_symbol": self.qsym.get(cs["quote"] or "", None),
             "chg_5m": cs["chg_5m"],
+            "smart_inflow": smart,
             "chg_1h": cs["chg_1h"],
             "vol_1h_quote": cs["vol_1h_quote"],
             "buyers_1h": cs["buyers_1h"],
+            "launch": self.intel.get(tok),
             "price_spot": rs.price() if rs else None,
             "reserve_quote": str(rs.quote) if rs and rs.complete else None,
             "block": block,
