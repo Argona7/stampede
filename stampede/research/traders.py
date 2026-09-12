@@ -636,18 +636,10 @@ HALF_COLS = ("trades", "pnl_eth", "realized_eth", "pnl_usd", "quality", "roi", "
 def load_halves(store: Store, prefix: str, run_ts: float, min_trades: int) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
     """Slim first-half / second-half rows of the wallets that qualify for the walk-forward (≥ min_trades first-half trades)
     plus the counts of both halves; read from the tables so the 14-day run never keeps every wallet in memory."""
-    cols = ",".join(f"a.{c}" for c in HALF_COLS) + "," + ",".join(f"b.{c}" for c in HALF_COLS)
-    rows = store.db.execute(
-        f"SELECT a.wallet, {cols} FROM {prefix}wallet_stats a LEFT JOIN {prefix}wallet_stats b ON b.wallet=a.wallet AND b.label='h2' AND b.run_ts=a.run_ts WHERE a.label='h1' AND a.run_ts=? AND a.trades>=?",
-        (run_ts, min_trades),
-    ).fetchall()
-    h1: dict[str, dict[str, Any]] = {}
-    h2: dict[str, dict[str, Any]] = {}
-    n = len(HALF_COLS)
-    for r in rows:
-        h1[r[0]] = dict(zip(HALF_COLS, r[1 : 1 + n]))
-        if r[1 + n] is not None:
-            h2[r[0]] = dict(zip(HALF_COLS, r[1 + n :]))
+    # two index-friendly scans joined in Python: a self-join on (label, run_ts) tempts the planner into a nested scan
+    cols = ",".join(HALF_COLS)
+    h1 = {r[0]: dict(zip(HALF_COLS, r[1:])) for r in store.db.execute(f"SELECT wallet, {cols} FROM {prefix}wallet_stats WHERE label='h1' AND run_ts=? AND trades>=?", (run_ts, min_trades))}
+    h2 = {r[0]: dict(zip(HALF_COLS, r[1:])) for r in store.db.execute(f"SELECT wallet, {cols} FROM {prefix}wallet_stats WHERE label='h2' AND run_ts=?", (run_ts,)) if r[0] in h1}
     return h1, h2
 
 
