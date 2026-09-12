@@ -190,7 +190,7 @@ trades, hit rate, expectancy in quote and USD via `fx_rates`, profit factor, max
 per-hour distribution, bootstrap 95 % CI by coin) and `GET /api/track-record` read the engine's memory in the live
 process and the tables anywhere else; `stampede track-record --db data/live-engine.sqlite --out docs/TRACK-RECORD.md
 --api http://127.0.0.1:PORT` writes the report (alerts by rule with outcomes, paper stats + CI, uptime / gaps / latency
-from `/api/perf`, the snapshot saved next to it). The report and every API response say the fills are simulated.
+from `/api/perf`, the snapshot saved next to it as `docs/TRACK-RECORD-perf.json`; hand-written run notes in `docs/TRACK-RECORD-notes.md` are included on every regeneration). The report and every API response say the fills are simulated.
 
 ## `GET /api/perf`
 

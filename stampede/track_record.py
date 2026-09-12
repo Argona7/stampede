@@ -150,7 +150,7 @@ def build(store: Store, since_ts: int | None = None, perf: dict[str, Any] | None
 
 
 # ---- markdown -----------------------------------------------------------------------------------------------------------
-def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None, api_url: str | None = None) -> str:
+def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None, api_url: str | None = None, notes: str | None = None) -> str:
     a = tr["alerts"]
     p = tr["paper"]
     st = p["stats"]
@@ -264,6 +264,11 @@ def render_markdown(tr: dict[str, Any], perf_snapshot_path: str | None = None, a
         for x in p["open"]:
             L.append(f"| {_utc(x['opened_ts'], '%m-%d %H:%M:%S')} | {x['symbol']} `{x['token'][:10]}` | {x['size_quote']:.4f} | {x['entry_px']:.3g} | {f'{x['ret'] * 100:+.1f} %' if x.get('ret') is not None else 'n/a'} | {_q(x.get('unrealized_quote'))} | {' · '.join((x.get('plan') or {}).get('text') or [])[:80]} |")
         L.append("")
+    if notes and notes.strip():
+        L.append("## Run notes")
+        L.append("")
+        L.append(notes.strip())
+        L.append("")
     L.append("## Reading this honestly")
     L.append("")
     L.append("- The paper ledger buys the coin nobody else was buying at that block: the observed trades are replayed unchanged and our fill moves only our own price. A real order would also pay gas and could fail or be front-run.")
@@ -299,7 +304,9 @@ def main_track_record(args) -> int:
         except Exception as e:  # noqa: BLE001
             print(f"/api/perf not reachable at {args.api}: {type(e).__name__}: {str(e)[:120]} (report written without the run section)", flush=True)
     tr = build(store, since_ts=getattr(args, "since", None), perf=perf, mode=getattr(args, "mode", None) or "live")
-    md = render_markdown(tr, perf_snapshot_path=snap_path, api_url=getattr(args, "api", None))
+    notes_path = Path(getattr(args, "notes", None) or "docs/TRACK-RECORD-notes.md")
+    notes = notes_path.read_text() if notes_path.exists() else None  # hand-written run notes survive every regeneration
+    md = render_markdown(tr, perf_snapshot_path=snap_path, api_url=getattr(args, "api", None), notes=notes)
     if args.out:
         Path(args.out).write_text(md)
         print(f"wrote {args.out}: {tr['alerts']['total']} alerts, {tr['paper']['stats']['trades']} closed paper trades, {tr['paper']['stats']['open']} open" + (f", uptime {tr['perf']['uptime_s']} s" if tr.get("perf") else ""), flush=True)

@@ -1,0 +1,558 @@
+{
+ "engine": "wss",
+ "started_at": 1789233866.752469,
+ "uptime_s": 5020,
+ "blocks": {
+  "first": 61279694,
+  "last": 61329522,
+  "head": 61329523,
+  "processed": 50507,
+  "live": 49445,
+  "backfilled": 384,
+  "fragments": 678,
+  "unfilled": 0,
+  "gaps_found": 2,
+  "gap_blocks": 384,
+  "gaps_backfilled_blocks": 384,
+  "gaps_unfilled_blocks": 0,
+  "late_logs": 26473,
+  "deferred_txs": 736,
+  "fast_grace": 2461,
+  "bulk_cap": 209,
+  "bloom_skip": 1729,
+  "skipped_at_start": null
+ },
+ "latency_ms": {
+  "head_to_logs_complete": {
+   "n": 49445,
+   "p50": 110.2,
+   "p90": 179.2,
+   "p95": 242.9,
+   "p99": 1001.9,
+   "max": 38723.6,
+   "mean": 268.6,
+   "window_n": 49445
+  },
+  "logs_to_trades": {
+   "n": 49445,
+   "p50": 0.3,
+   "p90": 1.6,
+   "p95": 6.2,
+   "p99": 82.9,
+   "max": 1283.6,
+   "mean": 6.9,
+   "window_n": 49445
+  },
+  "trades_to_radar": {
+   "n": 49445,
+   "p50": 5.4,
+   "p90": 11.6,
+   "p95": 17.5,
+   "p99": 44.6,
+   "max": 858.5,
+   "mean": 7.2,
+   "window_n": 49445
+  },
+  "block_to_emit": {
+   "n": 49445,
+   "p50": 118.2,
+   "p90": 191.7,
+   "p95": 262.0,
+   "p99": 1003.9,
+   "max": 38831.2,
+   "mean": 283.3,
+   "window_n": 49445
+  },
+  "apply_block": {
+   "n": 50507,
+   "p50": 5.8,
+   "p90": 12.4,
+   "p95": 18.7,
+   "p99": 46.0,
+   "max": 1202.2,
+   "mean": 7.6,
+   "window_n": 50000
+  },
+  "queue_wait": {
+   "n": 50507,
+   "p50": 0.1,
+   "p90": 0.7,
+   "p95": 5.3,
+   "p99": 41.0,
+   "max": 1283.6,
+   "mean": 7.5,
+   "window_n": 50000
+  },
+  "block_to_emit_backfill": {
+   "n": 384,
+   "p50": 5269.4,
+   "p90": 29590.2,
+   "p95": 38778.3,
+   "p99": 38819.6,
+   "max": 38847.5,
+   "mean": 13031.4,
+   "window_n": 384
+  },
+  "fragment_apply": {
+   "n": 678,
+   "p50": 3.9,
+   "p90": 14.4,
+   "p95": 24.7,
+   "p99": 65.1,
+   "max": 126.1,
+   "mean": 6.8,
+   "window_n": 678
+  }
+ },
+ "feed": {
+  "connections": {
+   "fast": {
+    "endpoint": "wss://robinhood-rpc.publicnode.com",
+    "connected": true,
+    "connects": 1,
+    "reconnects": 0,
+    "failovers": 0,
+    "errors": 0,
+    "stalls": 0,
+    "frames": 429000,
+    "mb": 452.62,
+    "logs": 379553,
+    "heads": 49447,
+    "last_frame_age_s": 0.06,
+    "connected_for_s": 5019,
+    "last_error": null,
+    "subscriptions": {
+     "heads": "0x96e1cd46328e01631037e5c66c339503",
+     "hook": "0xa6b54527087c588d4e4e98fe6b1f0000",
+     "swap": "0x7f554c92d87d3ecb1e445f6fe3f32afd",
+     "curve": "0x4a97cac2e0204ce759c4049ccc5a4b05",
+     "factory": "0x303b9eeddafabd78915a38c21b0ed29b"
+    },
+    "ping_rtt_ms": 94.4
+   },
+   "bulk": {
+    "endpoint": "wss://robinhood-rpc.publicnode.com",
+    "connected": true,
+    "connects": 1,
+    "reconnects": 0,
+    "failovers": 0,
+    "errors": 0,
+    "stalls": 0,
+    "frames": 1522003,
+    "mb": 1144.51,
+    "logs": 1522003,
+    "heads": 0,
+    "last_frame_age_s": 0.05,
+    "connected_for_s": 5019,
+    "last_error": null,
+    "subscriptions": {
+     "transfer": "0x635984bf8d439250ea3eef340c48896e"
+    },
+    "ping_rtt_ms": 91.5
+   }
+  },
+  "reconnects": 0,
+  "failovers": 0,
+  "stalls": 0,
+  "returns_to_preferred": 0,
+  "fast_health": {
+   "window": 60,
+   "with_logs": 60,
+   "empty_since": null
+  },
+  "first_head": 61280077,
+  "last_head": 61329523,
+  "last_head_age_s": 0.07,
+  "head_gap_ms": {
+   "n": 49446,
+   "p50": 99.4,
+   "p90": 145.6,
+   "p95": 171.0,
+   "p99": 284.9,
+   "max": 1794.6,
+   "mean": 101.5,
+   "window_n": 49446
+  },
+  "pending_blocks": 1,
+  "late_buckets": 0,
+  "assembler": {
+   "gaps": 2,
+   "gap_blocks": 384,
+   "released": 49829,
+   "released_backfill": 384,
+   "released_live": 49445,
+   "bloom_skip": 1729,
+   "late_transfers_parked": 10689,
+   "late_logs": 26473,
+   "fragments": 678,
+   "late_transfers_rejoined": 360,
+   "fast_grace": 2461,
+   "bulk_cap": 209,
+   "deferred_txs": 736
+  },
+  "gaps": [
+   {
+    "from": 61279694,
+    "to": 61280076,
+    "blocks": 383,
+    "reason": "missing heads",
+    "detected_at": 1789233867.2811258,
+    "filled_blocks": 383,
+    "fill_ms": 38738
+   },
+   {
+    "from": 61303953,
+    "to": 61303953,
+    "blocks": 1,
+    "reason": "header never arrived",
+    "detected_at": 1789236290.699685,
+    "filled_blocks": 1,
+    "fill_ms": 1177
+   }
+  ],
+  "gap_fills": {
+   "requests": 2,
+   "blocks_filled": 384,
+   "blocks_missing": 0
+  },
+  "backfill_ms": {
+   "n": 2,
+   "p50": 38737.8,
+   "p90": 38737.8,
+   "p95": 38737.8,
+   "p99": 38737.8,
+   "max": 38737.8,
+   "mean": 19957.2,
+   "window_n": 2
+  },
+  "skipped_at_start": null,
+  "errors": []
+ },
+ "events": {
+  "last_id": 380244,
+  "ring": 5000,
+  "ring_size": 5000,
+  "subscribers": 2,
+  "by_type": {
+   "session": 990,
+   "block": 50507,
+   "trade": 169318,
+   "alert": 4405,
+   "sequence": 110008,
+   "radar_delta": 44040,
+   "verdict": 544,
+   "position": 432
+  },
+  "per_s_60s": 60.98,
+  "per_s_10s": 67.3
+ },
+ "writer": {
+  "flushes": 48063,
+  "rows": 1517596,
+  "errors": 0,
+  "last_error": null,
+  "last_flush_ms": 3.9,
+  "pending_batches": 0,
+  "lag_s": 0.01,
+  "max_lag_s": 1.24,
+  "dropped_batches": 0,
+  "checkpoints": 83,
+  "by_table": {
+   "curves": 1146,
+   "tokens": 1578,
+   "infra": 1146,
+   "launches": 1145,
+   "blocks": 49829,
+   "logs": 962022,
+   "trades": 169318,
+   "wallets": 168160,
+   "alert_updates": 4335,
+   "paper": 492,
+   "sequences": 110008,
+   "token_meta": 1584,
+   "graduations": 30,
+   "pools": 15,
+   "alerts": 70,
+   "alert_symbols": 1
+  },
+  "flush_ms": {
+   "n": 48063,
+   "p50": 4.6,
+   "p90": 13.6,
+   "p95": 22.8,
+   "p99": 133.2,
+   "max": 1073.7,
+   "mean": 9.7,
+   "window_n": 48063
+  }
+ },
+ "process": {
+  "pid": 39377,
+  "cpu_percent_since_last_call": 68.6,
+  "cpu_percent_avg": 61.5,
+  "cpu_time_s": 3085.0,
+  "rss_mb": 414.1,
+  "maxrss_mb": 752.4,
+  "threads": 14
+ },
+ "state": {
+  "curves_seeded": 421360,
+  "pools_seeded": 7328,
+  "launches_seeded": 421330,
+  "launches": 422466,
+  "alert_outcomes": 4335,
+  "blocks": 50508,
+  "trades": 169321,
+  "sequences": 110013,
+  "wallets_tracked": 35933,
+  "coins_tracked": 2678,
+  "reserves_incomplete": 1088,
+  "graduations": 15,
+  "alerts_fired": 70,
+  "dup_trades": 13,
+  "edge_alerts_fired": 7,
+  "curves": 422497,
+  "pools": 7343,
+  "reserves": 2224,
+  "radar_rows": 368,
+  "ranked": 214,
+  "alerts_pending": 48,
+  "unresolved_curves": 0,
+  "tokens_needing_meta": 2,
+  "paper": {
+   "open": 0,
+   "closed": 13,
+   "pending": 0,
+   "realized_quote": -0.031158027465688028,
+   "paper_loaded_open": 1,
+   "paper_loaded_closed": 5,
+   "paper_closed": 8,
+   "paper_exit_inflow_dies": 2,
+   "paper_queued": 7,
+   "paper_opened": 7,
+   "paper_exit_stop": 4,
+   "paper_tp_fills": 1,
+   "paper_exit_trail": 1,
+   "paper_exit_trigger": 1
+  },
+  "notes": {
+   "non_universe_pool": 113202,
+   "no_net_wallet_change": 2855,
+   "ambiguous_recipients": 228,
+   "swap_without_transfer": 384,
+   "ambiguous_senders": 128,
+   "unresolved_curve": 7
+  },
+  "note_samples": {
+   "no_net_wallet_change": [
+    [
+     61329466,
+     "0x6c29a055053abdf817312fd1574a3167d7b3b1aa7b971a53521f18a57135ad62",
+     "live",
+     []
+    ],
+    [
+     61329468,
+     "0x7b3d83ea63574afffebf8af2780ea93b4944f3aa1d45fbadc479f679931ffdd4",
+     "live",
+     []
+    ],
+    [
+     61329473,
+     "0xc22200ad342b08199fad1ea84617926835f9456235a96ada78ea29abcea93065",
+     "live",
+     []
+    ],
+    [
+     61329477,
+     "0x4089edea0e293ea8a5a1a68ce3f3e275acdfb835da36f4687a9f5cf9a3822942",
+     "live",
+     []
+    ],
+    [
+     61329498,
+     "0x1cde8ee683c9b37b3d584552f87a772be22810447a0b5527f17e0ff0c2cacdb5",
+     "live",
+     []
+    ]
+   ],
+   "ambiguous_recipients": [
+    [
+     61328681,
+     "0xf4b06f34254383ef9b3a98ee1a9ccabc4885841ee64b170bc191a7b1b0b71f07",
+     "live",
+     []
+    ],
+    [
+     61328936,
+     "0x575e9e9234484833056109f1a53b54c3529b53e7c7f9abbcf2e9262eb58ef99b",
+     "live",
+     []
+    ],
+    [
+     61328968,
+     "0x4c32628ee8bb77a41dc8fad4abb95ca575a6c7f49f5938436cb73cdc2fd7c325",
+     "live",
+     []
+    ],
+    [
+     61329506,
+     "0xf3177c55f66b1a38c9938cce810cb58eee8689800dadda570369b0c8086172f7",
+     "live",
+     []
+    ],
+    [
+     61329517,
+     "0x3c990905c85ea733b3657c7047b70fc22b23690af83b4fd4d69a03eb8fc38297",
+     "live",
+     []
+    ]
+   ],
+   "swap_without_transfer": [
+    [
+     61327945,
+     "0x861ddaed5e73644e86b3fb96e57674f000eb5050bada3f0d8fcb25d19ed772e4",
+     "live",
+     []
+    ],
+    [
+     61328114,
+     "0x953bc8cd848b691420b039e020b09aa5935351e8c9624ee39567a514c25fa804",
+     "live",
+     []
+    ],
+    [
+     61328259,
+     "0xa438cba8f5c1d4f3e967b7ee74d472ef58e77f36b68fa18a4c4772d78710cc32",
+     "live",
+     []
+    ],
+    [
+     61328785,
+     "0x2298a362cd9e7a29fc7e993f67154a3f26fd7ee9ee1c8371376d104ce9fa7bb7",
+     "live",
+     []
+    ],
+    [
+     61329249,
+     "0xc96d35a9cbd1d2b462c72d90805967acd188940b1b6b30f1c85b69e0972e1e63",
+     "live",
+     []
+    ]
+   ],
+   "ambiguous_senders": [
+    [
+     61328539,
+     "0xe3284c72e7164298afe84c55f44c1ce6c14e45d196b93fda629fe023c1307973",
+     "live",
+     []
+    ],
+    [
+     61328588,
+     "0x9df2793c53a66450680bc2bc46531e94de0c893e06b7b18f7e9a8e4f752d6599",
+     "live",
+     []
+    ],
+    [
+     61329095,
+     "0x611b4f88ca0271adb7a7923d3602b2937cbfe2e9889befc2cc5b4ee94494e947",
+     "live",
+     []
+    ],
+    [
+     61329259,
+     "0xc697099976c953fc498385aaae4c903257a8d9b0631fd982d7097998a8039c24",
+     "live",
+     []
+    ],
+    [
+     61329323,
+     "0xe840c956d4f5d97e1cab1c458408fee37789dcf8636f9ae97a09cede3e8384cf",
+     "live",
+     []
+    ]
+   ]
+  },
+  "clock": 1789238886,
+  "next_trade_id": 879603
+ },
+ "resolver": {
+  "catchup_events": 6,
+  "catchup_to_block": 61280049,
+  "catchup_from_block": 61279666,
+  "snapshots": 1400,
+  "meta_resolved": 1584,
+  "curves_resolved": 1
+ },
+ "radar_reconcile": {
+  "at": 1789238847,
+  "clock": 1789238830,
+  "sql_ms": 17691,
+  "sql_rows": 366,
+  "memory_rows": 368,
+  "in_both": 364,
+  "only_sql": 2,
+  "only_memory": 4,
+  "inflow_10m_mismatch": 12,
+  "top5_sql": [
+   "0x84b74c4ff6262c6c773e672b87b856d889553c20",
+   "0x77268c5e3ea52e24f92b1aebb879edfa99d1ae82",
+   "0x4d4755290a6f620917886850211ee25a2611a6a4",
+   "0xa9f98809ebef21ac7d37cd3ca660992ffeeeb245",
+   "0xb4f038763e676c7d8fdda214d2ec7659fa1d8840"
+  ],
+  "top5_memory": [
+   "0x84b74c4ff6262c6c773e672b87b856d889553c20",
+   "0x77268c5e3ea52e24f92b1aebb879edfa99d1ae82",
+   "0x4d4755290a6f620917886850211ee25a2611a6a4",
+   "0xa9f98809ebef21ac7d37cd3ca660992ffeeeb245",
+   "0xb4f038763e676c7d8fdda214d2ec7659fa1d8840"
+  ]
+ },
+ "counts": {
+  "blocks": 50508,
+  "blocks_backfill": 384,
+  "blocks_live": 49446,
+  "flag_bloom_skip": 1729,
+  "blocks_late": 678,
+  "flag_late": 476,
+  "flag_fast_grace": 245,
+  "flag_bulk_cap": 209,
+  "flag_deferred": 202
+ },
+ "rules": {
+  "under_radar_top5": {
+   "score_min": 60,
+   "mentions_max": 3,
+   "rank_max": 5,
+   "inflow_min": 8,
+   "inflow_max": 40,
+   "age_max_s": 3600,
+   "chg_10m_max": 100
+  },
+  "edge_enter": {
+   "per_hour": 5,
+   "dedupe_s": 1800
+  }
+ },
+ "status": {
+  "engine": "wss",
+  "running": true,
+  "paused": false,
+  "ticks": 50508,
+  "last_error": null,
+  "head_block": 61329524,
+  "head_lag_s": 0.54,
+  "last_block": 61329523,
+  "last_ts": 1789238886,
+  "tick_ms": 9.5,
+  "new_trades_total": 169321,
+  "new_sequences_total": 110013,
+  "start_block": 61279694,
+  "start_ts": 1789233828,
+  "gaps": [],
+  "state_load_s": 0.8,
+  "catchup_s": 2.7,
+  "backfill_available": true
+ }
+}

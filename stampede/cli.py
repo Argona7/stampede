@@ -119,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--perf-json", default=None, help="a saved /api/perf snapshot to use instead of --api")
     p.add_argument("--since", type=int, default=None, help="count alerts and positions from this unix time (default: the latest engine start recorded in the store)")
     p.add_argument("--mode", default="live", help="alert journal mode to report (default live)")
+    p.add_argument("--notes", default="docs/TRACK-RECORD-notes.md", help="markdown file included verbatim as 'Run notes' when it exists (restarts, incidents, what changed)")
 
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
