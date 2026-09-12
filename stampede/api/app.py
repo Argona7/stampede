@@ -386,9 +386,10 @@ def _exactify_and_enrich(s: Store, edge_out: dict[str, Any]) -> None:
         s.upsert_blocks((n, int(b["timestamp"], 16), 1) for n, b in got.items())
         for n, b in got.items():
             s.db.execute("UPDATE trades SET ts=?, ts_exact=1 WHERE block=?", (int(b["timestamp"], 16), n))
+        s.commit()  # release the write lock before the next network call: the live engine's writer queues behind it
     txs = sorted({t["tx"] for t in trades if "tx_from" not in t and t["tx"] not in _exact_cache})[:40]
     if txs:
-        res = rpc.batch([("eth_getTransactionByHash", [h]) for h in txs])
+        res = rpc.batch([("eth_getTransactionByHash", [h]) for h in txs])  # network first, then one short write
         rows = []
         for h, r in zip(txs, res):
             if isinstance(r, dict) and r.get("from"):

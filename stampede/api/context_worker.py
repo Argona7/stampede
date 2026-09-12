@@ -80,8 +80,10 @@ class ContextWorker(threading.Thread):
                                 fetch_holders(store, rpc, tok, head, max_age_s=600)
                             if i < 10:
                                 launch_socials(store, rpc, tok)
+                            store.commit()  # never carry an implicit write transaction into the next network call
                     if self.alerts_enabled:
                         self._alerts(store, clock, rad, xm)
+                    store.commit()
                 self.status["last_cycle"] = time.time()
                 self.status["cycles"] += 1
                 self.status["last_error"] = None

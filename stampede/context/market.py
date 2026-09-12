@@ -62,6 +62,10 @@ class GeckoTerminal:
         try:
             r = self.s.get(f"{GT_BASE}/networks/{NETWORK}/tokens/{token}/pools", params={"page": 1}, timeout=self.timeout)
             bump(self.store, "geckoterminal")
+            # commit now: on a non-200 answer this function returns without the commit below and the budget INSERT would
+            # keep the write lock open across the worker's next network calls (holders, socials) - the engine's writer
+            # waited up to 36 s behind exactly that in the live run
+            self.store.commit()
             if r.status_code == 404:
                 body = {"found": False, "fetched_at": time.time()}
             elif r.status_code != 200:
