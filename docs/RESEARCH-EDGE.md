@@ -1,6 +1,6 @@
 # Is there an edge? Walk-forward runner model, alert precision and a simulated exit policy
 
-Generated 2026-09-12 12:06 UTC by `stampede edge` from `data/research-12h.sqlite` (coin_minutes run 1789214724).
+Generated 2026-09-12 12:12 UTC by `stampede edge` from `data/research-12h.sqlite` (coin_minutes run 1789214724).
 
 ## Targets (the programme goal, measured here)
 
@@ -10,26 +10,26 @@ Generated 2026-09-12 12:06 UTC by `stampede edge` from `data/research-12h.sqlite
 | lift over the coin-minute base rate | ≥ 5× | 7.8× | yes |
 | alert precedes the peak (median minutes, hits) | ≥ 2 min | 14 | yes |
 | policy expectancy per 0.02 ETH trade (test) | > 0 with CI lower bound > 0 | +0.0024 ETH, CI [-0.0030, +0.0086] | no |
-| catch rate of coins that did ≥ 3× within 60 min | reported | 3.6% (3 of 84) | — |
+| catch rate of coins that did ≥ 3× within 60 min (from a curve-stage minute of the test folds) | reported | 6.0% (3 of 50 coins) | — |
 
 ## Setup
 
-- Data: 64,899 coin-minutes with a trade, 2026-09-11 05:44–2026-09-11 10:49 UTC (5.1 h). Labels use the per-minute median trade price in quote units; a coin-minute counts when its 30-min horizon is inside the range (58,368 rows).
+- Data: 64,899 coin-minutes with a trade, 2026-09-11 05:44–2026-09-11 10:49 UTC (5.1 h). Labels use the per-minute median trade price in quote units; a coin-minute counts when its 30-min horizon is inside the range (58,368 rows, 19,906 of them on the curve).
 - Folds: 14 × 22 min — the store is shorter than the requested 7 + 7 days, so a fold is the range divided by 14; on the 14-day store a fold is one day. Train folds 0–6, test folds 7–13. Every fold ≥ 1 is scored by a model trained on earlier folds only (expanding window); the alert threshold and the exit policy are chosen on the train folds and applied unchanged to the test folds.
 - Model: `HistGradientBoostingClassifier` (200 iterations, 15 leaves, lr 0.06) on 46 features (missing values native), trained on curve-stage rows of every quote asset. Target: max gain ≥ 100% within 30 min or graduation within 30 min; secondary models for ≥ 50% and for a −50% drawdown.
 - Candidates for alerts: curve stage, ETH-quoted, reconstructed reserves, age 60 s – 4 h, rotation inflow ≥ 1 wallet in 10 min (1,188 test rows). Alert rule: p ≥ 0.455 (the threshold that gave 5.0 alerts/hour on the train folds), one alert per coin per 30 min.
-- Base rates on the test folds: all coin-minutes 5.39%, curve-stage 7.99%, candidates 14.90%. Lift is against the first.
+- Base rates on the test folds: all coin-minutes 5.40%, curve-stage 7.99%, candidates 14.90%. Lift is against the first.
 - Fees in the simulation: 1% curve fee, creator tax per coin (fitted from the first trades, else 100 bps — estimated, this store has no fee columns), snipe tax when the entry is < 3 s after launch, price impact of 0.02 ETH by the constant-product fill on the reconstructed reserves, 2 s entry latency. Exits at graduation are approximated by the last curve state.
 
 ## Alerts on the test folds
 
 | rule | alerts | coins | /h | ≥ 2× in 30 min | ≥ +50% | lift | lead (min) | lead ≥ 2 min | catch 3×/60 | median max gain | median drawdown |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| model_causal | 19 | 19 | 7.5 | 42.1% | 47.4% | 7.8× | 14 | 100.0% | 3.6% | 47.5% | -22.6% |
-| model_topk | 15 | 15 | 5.9 | 26.7% | 40.0% | 4.9× | 12 | 100.0% | 2.4% | 29.8% | -36.8% |
-| rules_calibrated | 18 | 17 | 7.1 | 33.3% | 33.3% | 6.2× | 21 | 100.0% | 3.6% | 19.2% | -25.1% |
-| radar_score | 11 | 11 | 4.3 | 18.2% | 27.3% | 3.4× | 15 | 100.0% | 1.2% | -3.8% | -58.7% |
-| under_radar | 42 | 42 | 16.5 | 21.4% | 35.7% | 4.0× | 8 | 100.0% | 3.6% | 0.0% | -36.1% |
+| model_causal | 19 | 19 | 7.5 | 42.1% | 47.4% | 7.8× | 14 | 100.0% | 6.0% | 47.5% | -22.6% |
+| model_topk | 15 | 15 | 5.9 | 26.7% | 40.0% | 4.9× | 12 | 100.0% | 4.0% | 29.8% | -36.8% |
+| rules_calibrated | 18 | 17 | 7.1 | 33.3% | 33.3% | 6.2× | 21 | 100.0% | 6.0% | 19.2% | -25.1% |
+| radar_score | 11 | 11 | 4.3 | 18.2% | 27.3% | 3.4× | 15 | 100.0% | 2.0% | -3.8% | -58.7% |
+| under_radar | 42 | 42 | 16.5 | 21.4% | 35.7% | 4.0× | 8 | 100.0% | 6.0% | 0.0% | -36.1% |
 
 `model_causal` is the deployable rule (threshold fixed on train). `model_topk` picks the k best rows of each clock hour with hindsight inside the hour and is an upper bound, not a rule. `rules_calibrated` is the no-model fallback the verdict uses (cell table below). `radar_score` thresholds the stage-1 score the same way. `under_radar` is the live alert rule.
 
@@ -38,11 +38,11 @@ Generated 2026-09-12 12:06 UTC by `stampede edge` from `data/research-12h.sqlite
 | alerts/h wanted | threshold p | test alerts | test /h | ≥ 2× | lift | lead (min) | catch 3× |
 |---|---|---|---|---|---|---|---|
 | 1 | 0.770 | 1 | 0.4 | 0.0% | — | — | 0.0% |
-| 2 | 0.740 | 2 | 0.8 | 50.0% | 9.3× | 22 | 1.2% |
-| 3 | 0.532 | 13 | 5.1 | 30.8% | 5.7× | 21 | 2.4% |
-| 5 | 0.455 | 19 | 7.5 | 42.1% | 7.8× | 14 | 3.6% |
-| 8 | 0.305 | 40 | 15.7 | 42.5% | 7.9× | 8 | 9.5% |
-| 12 | 0.199 | 64 | 25.1 | 32.8% | 6.1× | 10 | 10.7% |
+| 2 | 0.740 | 2 | 0.8 | 50.0% | 9.3× | 22 | 2.0% |
+| 3 | 0.532 | 13 | 5.1 | 30.8% | 5.7× | 21 | 4.0% |
+| 5 | 0.455 | 19 | 7.5 | 42.1% | 7.8× | 14 | 6.0% |
+| 8 | 0.305 | 40 | 15.7 | 42.5% | 7.9× | 8 | 16.0% |
+| 12 | 0.199 | 64 | 25.1 | 32.8% | 6.1× | 10 | 18.0% |
 
 ### Calibration on the test candidates (deciles of p)
 
@@ -157,7 +157,7 @@ Chosen: `tp=100%x50% trail=0.25 sl=0.3 time=45m inflow_dies=on smart_exit=off`.
 ## Reading this honestly
 
 - The range is 5.1 hours, so the folds are 22-minute slices, not days; the model for early folds saw minutes of data. Treat every number here as a pipeline check; the 14-day store is the measurement.
-- Alerts on the test folds: 19 on 19 coins. With a base rate of 5.39% and 19 alerts the 95% binomial interval of the precision is roughly ±22.2%; the bootstrap CI of the policy is wide for the same reason.
+- Alerts on the test folds: 19 on 19 coins. With a base rate of 5.40% and 19 alerts the 95% binomial interval of the precision is roughly ±22.2%; the bootstrap CI of the policy is wide for the same reason.
 - Signal minutes are autocorrelated (a coin stays a candidate while its inflow lasts); the per-coin table is the fairer count and the bootstrap resamples coins, not alerts.
 - The simulation buys the coin nobody else was buying at that second: the observed trades are replayed unchanged, our 0.02 ETH moves only our own fills. Sells at graduation are approximated by the last curve state; snipe-window entries pay the snipe tax; MEV, failed transactions and gas are not modelled.
 - Wallet features are walk-forward: rotation quality uses outcomes known at the decision minute; stage-2 smart-wallet features come from the first half of the range and are unknown (missing) before it.
@@ -176,4 +176,4 @@ stampede edge-features --db data/research-14d.sqlite
 stampede edge --db data/research-14d.sqlite --train-days 7 --test-days 7 --out docs/RESEARCH-EDGE.md
 ```
 
-Artefacts: model `data/models/edge-20260912.pkl` (gitignored), config `stampede/signals/edge-config.json`. Compute time 17 s (features 7.1 s).
+Artefacts: model `data/models/edge-20260912.pkl` (gitignored), config `stampede/signals/edge-config.json`. Compute time 18 s (features 7.1 s).

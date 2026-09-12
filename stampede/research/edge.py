@@ -71,21 +71,24 @@ def utc(ts: int | float | None) -> str:
 
 # ---- data -----------------------------------------------------------------------------------------------------------
 class Table:
-    """coin_minutes in column arrays (numpy), loaded in chunks."""
+    """coin_minutes in column arrays (numpy), loaded in chunks. Only the rows that can be traded (curve stage) are
+    loaded; the all-coin-minute base rate comes from a two-column query (`base_rates`)."""
 
-    def __init__(self, db: sqlite3.Connection, run_id: int, feature_cols: list[str]):
+    def __init__(self, db: sqlite3.Connection, run_id: int, feature_cols: list[str], stage: str | None = "curve"):
         import numpy as np
 
         self.features = feature_cols
         cols = feature_cols + LABEL_COLS + META_COLS
-        n = db.execute("SELECT COUNT(*) FROM coin_minutes WHERE run_id=?", (run_id,)).fetchone()[0]
+        where = "run_id=?" + (" AND stage=?" if stage else "")
+        args: tuple = (run_id, stage) if stage else (run_id,)
+        n = db.execute(f"SELECT COUNT(*) FROM coin_minutes WHERE {where}", args).fetchone()[0]
         self.n = n
         self.X = np.full((n, len(feature_cols)), np.nan, dtype=np.float32)
         self.L = np.full((n, len(LABEL_COLS)), np.nan, dtype=np.float64)
         self.meta: dict[str, list] = {c: [None] * n for c in META_COLS}
         cur = db.cursor()
         cur.arraysize = 20_000
-        cur.execute(f"SELECT {','.join(cols)} FROM coin_minutes WHERE run_id=? ORDER BY ts, token", (run_id,))
+        cur.execute(f"SELECT {','.join(cols)} FROM coin_minutes WHERE {where} ORDER BY ts, token", args)
         nf, nl = len(feature_cols), len(LABEL_COLS)
         i = 0
         while True:
@@ -107,6 +110,19 @@ class Table:
 
     def col(self, name: str):
         return self.X[:, self.features.index(name)]
+
+
+def base_rates(db: sqlite3.Connection, run_id: int, lo: int, fold_s: float, folds: dict[str, list[int]], n_folds: int) -> dict[str, float]:
+    """Runner rate over every labeled coin-minute (all stages) per fold group, without loading the features."""
+    hits: dict[str, list[int]] = {k: [0, 0] for k in folds}
+    member = {d: k for k, ds in folds.items() for d in ds}
+    for ts, r in db.execute("SELECT ts, runner_30 FROM coin_minutes WHERE run_id=? AND horizon_30=1 AND runner_30 IS NOT NULL", (run_id,)):
+        d = min(int((ts - lo) / fold_s), n_folds - 1)
+        k = member.get(d)
+        if k is not None:
+            hits[k][0] += 1
+            hits[k][1] += int(r)
+    return {k: (h / n if n else float("nan")) for k, (n, h) in hits.items()}
 
 
 def rules_score(t: Table):
@@ -527,11 +543,12 @@ def run(a) -> dict[str, Any]:
     cand = labeled & stage & is_eth & recon_ok & ~np.isnan(age) & (age <= a.age_max_s) & (age >= a.min_age_s) & (inflow >= a.min_inflow)
     in_train = np.isin(fold, train_folds)
     in_test = np.isin(fold, test_folds)
-    base_all_test = float(y2[labeled & in_test].mean()) if (labeled & in_test).any() else float("nan")
+    br = base_rates(fdb, run["run_id"], lo, fold_s, {"train": train_folds, "test": test_folds}, n_folds)
+    base_all_test, base_all_train = br["test"], br["train"]
     base_curve_test = float(y2[labeled & stage & in_test].mean()) if (labeled & stage & in_test).any() else float("nan")
     base_cand_test = float(y2[cand & in_test].mean()) if (cand & in_test).any() else float("nan")
-    base_all_train = float(y2[labeled & in_train].mean()) if (labeled & in_train).any() else float("nan")
-    log(f"rows {t.n:,}; labeled {int(labeled.sum()):,}; curve {int((labeled & stage).sum()):,}; candidates {int(cand.sum()):,} (ETH, curve, reconstructed, age ≤ {a.age_max_s // 3600} h, inflow ≥ {a.min_inflow}); test base rate {pct(base_all_test, 2)}")
+    n_labeled_all = fdb.execute("SELECT COUNT(*) FROM coin_minutes WHERE run_id=? AND horizon_30=1", (run["run_id"],)).fetchone()[0]
+    log(f"rows {run['rows']:,} (curve-stage loaded: {t.n:,}); labeled {n_labeled_all:,}; curve {int((labeled & stage).sum()):,}; candidates {int(cand.sum()):,} (ETH, curve, reconstructed, age ≤ {a.age_max_s // 3600} h, inflow ≥ {a.min_inflow}); test base rate {pct(base_all_test, 2)}")
 
     # ---- walk-forward model over every fold >= 1 ----
     targets = {"p2x": y2, "p50": y50, "pdd50": ydd}
@@ -736,12 +753,12 @@ def run(a) -> dict[str, Any]:
         ["lift over the coin-minute base rate", "≥ 5×", f"{mc['lift']:.1f}×" if mc["lift"] else "—", "yes" if (mc["lift"] or 0) >= 5 else "no"],
         ["alert precedes the peak (median minutes, hits)", "≥ 2 min", fnum(mc["lead_median_min"], 0), "yes" if (mc["lead_median_min"] or 0) >= 2 else "no"],
         ["policy expectancy per 0.02 ETH trade (test)", "> 0 with CI lower bound > 0", f"{chosen_test.get('expectancy', 0):+.4f} ETH, CI [{chosen_test.get('ci95', (0, 0))[0]:+.4f}, {chosen_test.get('ci95', (0, 0))[1]:+.4f}]" if chosen_test.get("n") else "no trades", "yes" if chosen_test.get("n") and chosen_test.get("ci95", (0,))[0] > 0 else "no"],
-        ["catch rate of coins that did ≥ 3× within 60 min", "reported", f"{pct(mc['catch_3x'])} ({mc['caught']} of {mc['catch_n']})", "—"],
+        ["catch rate of coins that did ≥ 3× within 60 min (from a curve-stage minute of the test folds)", "reported", f"{pct(mc['catch_3x'])} ({mc['caught']} of {mc['catch_n']} coins)", "—"],
     ]
     md += md_table(["target", "bar", "measured (test folds)", "met"], targets_rows)
     md.append("## Setup")
     md.append("")
-    md.append(f"- Data: {run['rows']:,} coin-minutes with a trade, {utc(lo)}–{utc(hi)} UTC ({span / 3600:.1f} h). Labels use the per-minute median trade price in quote units; a coin-minute counts when its 30-min horizon is inside the range ({int(labeled.sum()):,} rows).")
+    md.append(f"- Data: {run['rows']:,} coin-minutes with a trade, {utc(lo)}–{utc(hi)} UTC ({span / 3600:.1f} h). Labels use the per-minute median trade price in quote units; a coin-minute counts when its 30-min horizon is inside the range ({n_labeled_all:,} rows, {int(labeled.sum()):,} of them on the curve).")
     md.append(f"- Folds: {n_folds} × {fold_s / 60:.0f} min{' — the store is shorter than the requested ' + str(a.train_days) + ' + ' + str(a.test_days) + ' days, so a fold is the range divided by ' + str(n_folds) + '; on the 14-day store a fold is one day' if compressed else ' (days)'}. Train folds 0–{a.train_days - 1}, test folds {a.train_days}–{n_folds - 1}. Every fold ≥ 1 is scored by a model trained on earlier folds only (expanding window); the alert threshold and the exit policy are chosen on the train folds and applied unchanged to the test folds.")
     md.append(f"- Model: `HistGradientBoostingClassifier` (200 iterations, 15 leaves, lr 0.06) on {len(t.features)} features (missing values native), trained on curve-stage rows of every quote asset. Target: max gain ≥ 100% within 30 min or graduation within 30 min; secondary models for ≥ 50% and for a −50% drawdown.")
     md.append(f"- Candidates for alerts: curve stage, ETH-quoted, reconstructed reserves, age {a.min_age_s} s – {a.age_max_s // 3600} h, rotation inflow ≥ {a.min_inflow} wallet in 10 min ({int((cand & in_test).sum()):,} test rows). Alert rule: p ≥ {thr:.3f} (the threshold that gave {a.k} alerts/hour on the train folds), one alert per coin per 30 min.")
