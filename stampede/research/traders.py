@@ -853,13 +853,16 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
     snipers = sum(1 for r in rows if "sniper" in r["tags"])
     exempt = sum(1 for r in rows if "snipe_exempt" in r["tags"])
     closed_total = sum(r["positions_closed"] for r in rows)
-    active = [r for r in rows if r["positions_closed"] >= 1]
+    active = [r for r in rows if r["positions_closed"] >= 1 and r["cost_eth"] > 0]  # ETH-quoted traders with a round trip
     winners = [r for r in active if r["pnl_eth"] > 0]
     md: list[str] = []
     md.append("# Trader intelligence: who earns on PONS after fees, and does it persist?")
     md.append("")
     md.append(f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} by `stampede traders` from `{a.db}`.")
     md.append("")
+    if getattr(a, "note", ""):
+        md.append(f"> {a.note}")
+        md.append("")
     md.append("## Setup")
     md.append("")
     md.append(f"- Data: {n_trades:,} trades by {wp['wallets']:,} non-infrastructure wallets on {tp['tokens']:,} coins, {fmt_ts(lo)}–{fmt_ts(hi)} UTC ({(hi - lo) / 3600:.1f} h). Walk-forward split at {fmt_ts(mid)} UTC (first half: {len(h1):,} wallets, second half: {len(h2):,}).")
@@ -878,7 +881,7 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
     md.append("")
     md.append("## Population")
     md.append("")
-    md.append(f"- {len(rows):,} wallets with ≥ 1 trade; {len(active):,} with ≥ 1 closed position; of those {len(winners):,} ({pct(len(winners) / len(active) if active else None)}) ended the range with a positive ETH PnL (realized + unrealized).")
+    md.append(f"- {len(rows):,} wallets with ≥ 1 trade; {len(active):,} traded ETH-quoted coins and closed ≥ 1 position; of those {len(winners):,} ({pct(len(winners) / len(active) if active else None)}) ended the range with a positive ETH PnL (realized + unrealized). Wallets quoted only in other assets are counted in the leaderboards by their per-asset sums, not here.")
     if active:
         pnls = sorted(r["pnl_eth"] for r in active)
         md.append(f"- ETH PnL across wallets with a closed position: median {median(pnls):+.4f} ETH, mean {sum(pnls) / len(pnls):+.4f}, sum {sum(pnls):+.2f}; fees paid {sum(r['fees_eth'] for r in active):.2f} ETH.")
@@ -946,6 +949,10 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
     md.append("")
     md.append("```")
     md.append(f"uv run stampede traders --db {a.db} --fees {a.fees} --min-trades {a.min_trades} --top {a.top} --out {a.out or 'docs/RESEARCH-TRADERS.md'}")
+    md.append("# 14-day research store (real fee columns), once data/backfill-14d.log says READY:")
+    md.append("uv run stampede fx --db data/research-14d.sqlite --days 16   # hourly ETH rates for the USD columns")
+    md.append("uv run stampede traders --db data/research-14d.sqlite --fees strict --out docs/RESEARCH-TRADERS.md")
+    md.append("# stores normalized before the fee columns existed (NULL fee_raw): --fees estimate")
     md.append("# then: GET /api/traders?preset=smart · GET /api/wallet/<address> · web TRADERS view (key 4) · TUI screen 3")
     md.append("```")
     md.append("")
@@ -998,6 +1005,7 @@ def build_parser(ap: argparse.ArgumentParser | None = None) -> argparse.Argument
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--no-write", action="store_true", help="do not write wallet_stats / wallet_positions / wallet_scores")
     ap.add_argument("--json", default="", help="also write the numbers as json here")
+    ap.add_argument("--note", default="", help="one line shown at the top of the report (which store, what is provisional)")
     return ap
 
 
