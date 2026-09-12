@@ -238,6 +238,7 @@ class BlockAssembler:
         self.next_release: int | None = None
         self.pools_seen: set[str] = set()
         self.released_swap_txs: dict[int, set[str]] = {}  # last released blocks -> their swap transactions (late-transfer filter)
+        self.orphans: dict[int, dict[str, dict[tuple[str, int], dict[str, Any]]]] = {}  # late transfers of transactions without a swap yet
         self.gap_requests: list[tuple[int, int]] = []
         self.gaps: list[dict[str, Any]] = []
         self.stats: Counter = Counter()
@@ -305,12 +306,21 @@ class BlockAssembler:
         if conn == "bulk" and n > self.bulk_max:
             self.bulk_max = n
         if self.next_release is not None and n < self.next_release:
-            if conn == "bulk" and log["tx_hash"] not in self.released_swap_txs.get(n, ()) and n not in self.late:
-                self.stats["late_transfers_dropped"] += 1  # a straggling transfer of a transaction without a PONS swap: nothing to attribute
+            tx = log["tx_hash"]
+            if conn == "bulk" and tx not in self.released_swap_txs.get(n, ()) and n not in self.late:
+                # a straggling transfer of a transaction without a known PONS swap: parked, in case its swap log is late too
+                self.stats["late_transfers_parked"] += 1
+                self.orphans.setdefault(n, {}).setdefault(tx, {})[(tx, log["log_index"])] = log
+                for k in [k for k in self.orphans if k < n - 300]:
+                    del self.orphans[k]
                 return
             self.stats["late_logs"] += 1
             lb = self._late(n, None, None, t)
-            lb.logs.setdefault((log["tx_hash"], log["log_index"]), log)
+            lb.logs.setdefault((tx, log["log_index"]), log)
+            parked = self.orphans.get(n, {}).pop(tx, None)
+            if parked:
+                lb.logs.update(parked)
+                self.stats["late_transfers_rejoined"] += len(parked)
             lb.t_last = t
             return
         pb = self.pending.get(n)

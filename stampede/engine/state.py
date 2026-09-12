@@ -205,7 +205,7 @@ class EngineState:
         self.next_trade_id = int(r[0] or 0) + 1
         self.seen_trades: OrderedDict[tuple[str, str, str], int] = OrderedDict()
         self.applied_curve_events: OrderedDict[tuple[str, int], None] = OrderedDict()
-        self.recent_tx_logs: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        self.recent_block_logs: OrderedDict[int, dict[str, list[dict[str, Any]]]] = OrderedDict()
         self.wallet_ring: dict[str, deque[T]] = defaultdict(deque)
         self.coin_trades: dict[str, deque[tuple]] = defaultdict(deque)  # (ts, side, token_amount, quote_amount, quote_token, wallet)
         self.coin_seqs: dict[str, deque[tuple[int, str, str]]] = defaultdict(deque)  # (buy_ts, wallet, sell_token), main grades only
@@ -320,13 +320,19 @@ class EngineState:
         by_tx: dict[str, list[dict[str, Any]]] = {}
         for l in block.logs:
             by_tx.setdefault(l["tx_hash"], []).append(l)
+        # every log of the last 300 blocks stays reachable by (block, tx): a fragment (late swap log, deferred or late
+        # transfers, a backfill of a released block) is normalized together with what already arrived for its transaction
+        recent = self.recent_block_logs.setdefault(block.number, {})
         if block.is_fragment:
             for tx, logs in by_tx.items():
-                prev = self.recent_tx_logs.get(tx)
+                prev = recent.get(tx)
                 if prev:
                     seen = {l["log_index"] for l in logs}
                     logs.extend(l for l in prev if l["log_index"] not in seen)
                     logs.sort(key=lambda l: l["log_index"])
+        recent.update(by_tx)
+        while len(self.recent_block_logs) > 300:
+            self.recent_block_logs.popitem(last=False)
         # 1. lifecycle + reserves
         n_launch = n_grad = 0
         for tx, logs in by_tx.items():
@@ -352,9 +358,6 @@ class EngineState:
             if not has_swap:
                 continue
             n_swap_tx += 1
-            if len(self.recent_tx_logs) >= 4000:
-                self.recent_tx_logs.popitem(last=False)
-            self.recent_tx_logs[tx] = logs
             trades, notes = trades_from_tx(tx, block.number, logs, self.ctx)
             for _tok, note, detail in notes:
                 self.notes[note] += 1

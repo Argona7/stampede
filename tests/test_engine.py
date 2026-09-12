@@ -283,6 +283,49 @@ def test_launch_and_curve_events_maintain_the_registry_and_reserves(tmp_path):
     store.close()
 
 
+def test_late_swap_logs_and_parked_transfers_still_yield_the_trade(tmp_path):
+    """Under load the node can deliver a PONS log after the next head: the block is already released. The state keeps the
+    logs of the last 300 blocks, so the late fragment is normalized together with the on-time transfers; transfers that
+    arrive late for a transaction without a swap yet are parked by the assembler and rejoined when the swap log comes."""
+    store = seeded_store(tmp_path / "late.sqlite")
+    st = EngineState(store)
+    asm = BlockAssembler(pons_pool=st.is_pons_pool, bloom=PonsBloom())
+    t = 5000.0
+    z = ["0x" + WALLET_1[2:].rjust(64, "0"), "0x" + WALLET_1[2:].rjust(64, "0")]
+    amt = 10**18
+    # block 40: tx X = a curve buy whose swap log is late; its transfer (curve -> wallet) arrives on time on the bulk side
+    asm.on_head(head(40), t)
+    tr = tagged(transfer(TOKEN_A, CURVE_A, WALLET_1, amt, 3), 40, "0xx", 1)
+    asm.on_log(tr, "bulk", t + 0.01)
+    asm.on_head(head(41, bloom=ZERO_BLOOM), t + 0.1)
+    asm.on_log(parse_log(rpc_log(41, "0xy", 0, chain.T_TRANSFER, TOKEN_B, 0, z)), "bulk", t + 0.12)
+    out = asm.poll(t + 0.13)
+    assert [b.number for b in out] == [40, 41] and [l["log_index"] for l in out[0].logs] == [3]
+    for b in out:
+        events, wb, _ = st.apply_block(b)
+        assert not [e for e in events if e[0] == "trade"]  # no swap seen yet: the transfer alone is not a trade
+    late_swap = tagged(curve_buy(CURVE_A, WALLET_1, WALLET_1, 10**15, amt, 2), 40, "0xx", 1)
+    asm.on_log(late_swap, "fast", t + 0.3)
+    frags = asm.poll(t + 0.45)
+    assert len(frags) == 1 and frags[0].source == "late" and [l["log_index"] for l in frags[0].logs] == [2]
+    events, wb, _ = st.apply_block(frags[0])
+    trades = [d for typ, d in events if typ == "trade"]
+    assert len(trades) == 1 and trades[0]["wallet"] == WALLET_1 and trades[0]["side"] == "buy" and trades[0]["tx"] == "0xx" and len(wb.trades) == 1
+    # block 42: tx Y sells on curve C; both its transfer and its swap log are late, the transfer first
+    asm.on_head(head(42, bloom=ZERO_BLOOM), t + 0.5)
+    asm.on_head(head(43, bloom=ZERO_BLOOM), t + 0.6)
+    assert [b.number for b in asm.poll(t + 0.6)] == [42, 43]
+    asm.on_log(tagged(transfer(TOKEN_C, WALLET_2, CURVE_C, amt, 7), 42, "0xyy", 2), "bulk", t + 0.7)
+    assert asm.stats["late_transfers_parked"] == 1 and asm.poll(t + 0.9) == []
+    asm.on_log(tagged(curve_sell(CURVE_C, WALLET_2, WALLET_2, amt, 10**15, 8), 42, "0xyy", 2), "fast", t + 1.0)
+    frags = asm.poll(t + 1.15)
+    assert len(frags) == 1 and [l["log_index"] for l in frags[0].logs] == [7, 8] and asm.stats["late_transfers_rejoined"] == 1
+    events, wb, _ = st.apply_block(frags[0])
+    trades = [d for typ, d in events if typ == "trade"]
+    assert len(trades) == 1 and trades[0]["wallet"] == WALLET_2 and trades[0]["side"] == "sell" and trades[0]["symbol"] == "CCC"
+    store.close()
+
+
 # ---- SSE stream + perf --------------------------------------------------------------------------------------------------
 def parse_sse(text: str) -> list[dict]:
     out = []
