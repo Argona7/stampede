@@ -126,6 +126,35 @@ def test_gap_detection_and_backfill_fill_the_hole_in_order():
     assert asm.stats["gaps"] == 1 and asm.stats["gap_blocks"] == 3 and asm.stats.get("gap_unfilled_blocks", 0) == 0
 
 
+def test_stalled_log_subscriptions_are_detected_and_the_window_is_refetched():
+    """Heads keep flowing but no PONS log arrives for 60 blocks whose bloom expects them: the assembler reports the stall;
+    the reconnect registers the whole empty window (not just the last block) for the HTTP backfill."""
+    asm = BlockAssembler(pons_pool=lambda pid: False, bloom=PonsBloom())
+    t = 7000.0
+    for i, n in enumerate(range(500, 530)):  # healthy: every other block has a curve log
+        asm.on_head(head(n), t + i * 0.1)
+        if i % 2 == 0:
+            asm.on_log(parse_log(rpc_log(n, f"0x{n:x}", 1, chain.T_CURVE_SELL, CURVE_A, 0)), "fast", t + i * 0.1 + 0.001)
+            asm.on_log(parse_log(rpc_log(n, f"0x{n:x}", 2, chain.T_TRANSFER, TOKEN_A, 0, ["0x" + "0" * 64, "0x" + "0" * 64])), "bulk", t + i * 0.1 + 0.02)
+            asm.on_log(parse_log(rpc_log(n + 1, "0xb", 0, chain.T_TRANSFER, TOKEN_B, 0, ["0x" + "0" * 64, "0x" + "0" * 64])), "bulk", t + i * 0.1 + 0.09)
+        asm.poll(t + i * 0.1 + 0.095)
+    assert not asm.fast_logs_dead and asm.fast_empty_since in (None, 529)
+    for i, n in enumerate(range(530, 600)):  # the log subscriptions die: heads only, blooms still say "maybe"
+        asm.on_head(head(n), t + 3 + i * 0.1)
+        asm.poll(t + 3 + i * 0.1 + 0.05)
+    assert asm.fast_logs_dead and asm.fast_empty_since == 529 or asm.fast_empty_since == 530
+    dead_from = asm.fast_empty_since
+    asm.on_connected("fast")  # the feed reconnected
+    asm.on_head(head(600), t + 11)
+    req = asm.take_gap_requests()
+    assert req == [(dead_from, 599)] and asm.gaps[-1]["reason"] == "fast (re)connect" and not asm.fast_logs_dead
+    assert all(asm.late[n].wait_backfill for n in range(dead_from, 599)) and asm.stats["gap_blocks"] == 599 - dead_from + 1
+    # a healthy bulk stream is 0-2 blocks behind the heads; 50 behind means it stalled (here it stopped at 529 too)
+    assert asm.bulk_dead
+    asm.bulk_max = 598
+    assert not asm.bulk_dead
+
+
 def test_bloom_filter_has_no_false_negatives():
     pb = PonsBloom([POOL_B])
     b = bloom_mask(bytes.fromhex(chain.V4_POOL_MANAGER[2:])) | bloom_mask(bytes.fromhex(chain.T_V4_SWAP[2:])) | bloom_mask(bytes.fromhex(POOL_B[2:]))

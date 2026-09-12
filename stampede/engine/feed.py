@@ -19,7 +19,7 @@ import json
 import queue
 import threading
 import time
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable
 
@@ -237,6 +237,10 @@ class BlockAssembler:
         self.last_head: int | None = None
         self.next_release: int | None = None
         self.pools_seen: set[str] = set()
+        # subscription health: a free node can stop delivering the log subscriptions while `newHeads` keeps flowing
+        # (observed on publicnode 2026-09-12, 11:07 UTC, after 30 min); the feed reconnects when this says so
+        self.fast_health: deque[bool] = deque(maxlen=60)  # per released block whose bloom expects PONS logs: did any arrive?
+        self.fast_empty_since: int | None = None  # first block of the current streak without fast logs
         self.released_swap_txs: dict[int, set[str]] = {}  # last released blocks -> their swap transactions (late-transfer filter)
         self.orphans: dict[int, dict[str, dict[tuple[str, int], dict[str, Any]]]] = {}  # late transfers of transactions without a swap yet
         self.gap_requests: list[tuple[int, int]] = []
@@ -264,11 +268,26 @@ class BlockAssembler:
             lo = self.bulk_max if self.bulk_max >= 0 else (self.next_release if self.next_release is not None else (min(self.pending) if self.pending else n))
             hi = n - 1
         else:
-            lo = hi = self.last_head if self.last_head is not None else -1  # fast: missing heads are handled by on_head; only the partial block is suspect
+            # fast: missing heads are handled by on_head; the partial block is suspect, and so is every block released
+            # without PONS logs since the log subscriptions went quiet (a stalled subscription, see fast_logs_dead)
+            hi = self.last_head if self.last_head is not None else -1
+            lo = self.fast_empty_since if (self.fast_empty_since is not None and hi >= 0) else hi
+            self.fast_health.clear()
+            self.fast_empty_since = None
         if lo is None or lo < 0:
             return
         if lo <= hi and hi - lo < 20000:
             self._register_gap(lo, hi, f"{role} (re)connect", t)
+
+    @property
+    def fast_logs_dead(self) -> bool:
+        """True when the last 60 blocks whose bloom expected PONS logs got (almost) none: the subscriptions are gone."""
+        return len(self.fast_health) == self.fast_health.maxlen and sum(self.fast_health) <= 1
+
+    @property
+    def bulk_dead(self) -> bool:
+        """True when the transfer stream is 50+ blocks (5 s) behind the heads."""
+        return self.last_head is not None and self.bulk_max >= 0 and self.last_head - self.bulk_max >= 50
 
     def on_head(self, hdr: dict[str, Any], t: float) -> None:
         n = int(hdr["number"], 16)
@@ -413,6 +432,12 @@ class BlockAssembler:
             if pb.n_fast == 0 and not pb.expect_fast:
                 pb.flags.add("bloom_skip")
                 self.stats["bloom_skip"] += 1
+            if pb.expect_fast:
+                self.fast_health.append(pb.n_fast > 0)
+                if pb.n_fast > 0:
+                    self.fast_empty_since = None
+                elif self.fast_empty_since is None:
+                    self.fast_empty_since = n
             out.append(self._release(pb, now, "live"))
         out.extend(self._poll_late(now))
         return out
@@ -503,6 +528,7 @@ class ConnMetrics:
     connects: int = 0
     failovers: int = 0
     errors: int = 0
+    stalls: int = 0
     frames: int = 0
     bytes: int = 0
     logs: int = 0
@@ -521,6 +547,7 @@ class ConnMetrics:
             "reconnects": max(0, self.connects - 1),
             "failovers": self.failovers,
             "errors": self.errors,
+            "stalls": self.stalls,
             "frames": self.frames,
             "mb": round(self.bytes / 1e6, 2),
             "logs": self.logs,
@@ -534,6 +561,10 @@ class ConnMetrics:
 
 
 BackfillFn = Callable[[int, int], dict[int, tuple[int | None, str | None, list[dict[str, Any]]]]]
+
+
+class SubscriptionStalled(RuntimeError):
+    """The connection is open but a subscription stopped delivering: reconnect, and prefer the other endpoint."""
 
 
 class Feed:
@@ -611,6 +642,7 @@ class Feed:
                 m.failovers += 1
             m.endpoint = url
             t_open = time.time()
+            stalled = False
             try:
                 async with connect(url, max_size=MAX_FRAME, ping_interval=15, ping_timeout=15, open_timeout=10, close_timeout=2, max_queue=4096) as ws:
                     names = await self._subscribe(ws, subs)
@@ -622,6 +654,12 @@ class Feed:
                     await self._recv(ws, role, names, m)
             except asyncio.CancelledError:
                 raise
+            except SubscriptionStalled as e:
+                stalled = True
+                m.stalls += 1
+                m.last_error = f"stalled: {redact(str(e))[:140]}"
+                self.errors.append(f"{time.strftime('%H:%M:%S')} {role} {url}: {m.last_error}")
+                del self.errors[:-20]
             except Exception as e:  # noqa: BLE001 - transport: reconnect with backoff, alternate endpoints
                 m.errors += 1
                 m.last_error = f"{type(e).__name__}: {redact(str(e))[:140]}"
@@ -631,8 +669,9 @@ class Feed:
             m.subscriptions = {}
             if self._stop.is_set():
                 break
-            fails = 0 if time.time() - t_open >= self.stable_after_s else fails + 1
-            await asyncio.sleep(min(15.0, 0.25 * (2**fails)) if fails else 0.05)
+            # a stalled subscription counts as a failure so the next attempt goes to the other endpoint
+            fails = 0 if (time.time() - t_open >= self.stable_after_s and not stalled) else fails + 1
+            await asyncio.sleep(min(15.0, 0.25 * (2**fails)) if (fails and not stalled) else 0.05)
 
     async def _subscribe(self, ws, subs: dict[str, list[Any]]) -> dict[str, str]:
         ids = {}
@@ -687,6 +726,11 @@ class Feed:
             if lat:
                 m.rtt_ms = round(lat * 1000, 1)
             self._drain(t)
+            if t - (m.connected_since or t) >= 30:  # never judge a connection in its first 30 s
+                if role == "fast" and self.asm.fast_logs_dead:
+                    raise SubscriptionStalled("heads keep coming but the log subscriptions delivered nothing for 60 blocks that should have PONS logs")
+                if role == "bulk" and self.asm.bulk_dead:
+                    raise SubscriptionStalled(f"transfer stream {self.asm.last_head - self.asm.bulk_max} blocks behind the heads")
 
     def _on_head(self, r: dict[str, Any], t: float) -> None:
         if self.first_head is None:
@@ -764,6 +808,8 @@ class Feed:
             "connections": {role: m.snapshot(now) for role, m in self.metrics.items()},
             "reconnects": sum(max(0, m.connects - 1) for m in self.metrics.values()),
             "failovers": sum(m.failovers for m in self.metrics.values()),
+            "stalls": sum(m.stalls for m in self.metrics.values()),
+            "fast_health": {"window": len(self.asm.fast_health), "with_logs": sum(self.asm.fast_health), "empty_since": self.asm.fast_empty_since},
             "first_head": self.first_head,
             "last_head": self.asm.last_head,
             "last_head_age_s": round(now - self._last_head_t, 2) if self._last_head_t else None,
