@@ -1,6 +1,6 @@
 # Trader intelligence: who earns on PONS after fees, and does it persist?
 
-Generated 2026-09-12 10:25 UTC by `stampede traders` from `data/research-12h.sqlite`.
+Generated 2026-09-12 10:34 UTC by `stampede traders` from `data/research-12h.sqlite`.
 
 > Dry run on the 5-hour research store (data/research-12h.sqlite, normalized before the fee columns existed: the 1% base fee is applied by rule, creator and snipe tax are unknown, so PnL is slightly optimistic and sniper flags rest on launch times alone). The 14-day store with real fee columns replaces this report when its backfill is READY; the smoke store with real fees (10 min, 15.6k trades) reproduces the same pipeline: 4,365 wallets, 991 closed positions, 3 bots, 103 deployer-linked, 141 snipers.
 
@@ -11,7 +11,7 @@ Generated 2026-09-12 10:25 UTC by `stampede traders` from `data/research-12h.sql
 - USD: no fx_rates in this store: USD columns are n/a (run `stampede fx --db ...`). PnL is stated in quote units first; the ETH columns cover positions quoted in native ETH/WETH (41,579 wallets); other quote assets are kept per asset in `pnl_by_quote`.
 - Wallets tagged: 160 bots (> 60 trades/h over their active span, > 500 trades, or ≥ 3 blocks with buys of several coins), 1,560 deployer-linked (deployer of a coin they traded, or bought without snipe tax while later buyers still paid it: 0), 2,401 snipers (≥ 30% of entries under 3 s after launch or with snipe tax paid).
 - Positions: 119,939 closed (wallet, coin) episodes; a position closes when ≤ 1% of its peak inventory is left (the dust is written off). Sells without matching lots (tokens received by transfer, or bought before the range) are ignored, never counted as profit.
-- Compute: token pass 2.1 s, wallet pass 7.2 s, total 13 s.
+- Compute: token pass 1.8 s, wallet pass 7.4 s, total 251 s.
 
 ## Definitions
 
@@ -144,7 +144,7 @@ Stats are built on 2026-09-11 05:44–2026-09-11 08:16 and the same wallets are 
 | top-50 by first-half quality | 50 | +0.0101 | -0.0002 | [-0.0209, +0.0529] | 34% | +0.507 |
 | top-50 by first-half PnL | 50 | +0.0334 | +0.0000 | [-0.0039, +0.0748] | 46% | +1.670 |
 | bottom-50 by first-half quality | 50 | -0.0341 | -0.0070 | [-0.0524, -0.0165] | 16% | -1.704 |
-| all eligible wallets | 5827 | +0.0022 | +0.0000 | [-0.0036, +0.0090] | 26% | +12.830 |
+| all eligible wallets | 5827 | +0.0022 | +0.0000 | [-0.0031, +0.0093] | 26% | +12.830 |
 
 ## Copy-test: follow the top-K wallets in the second half
 

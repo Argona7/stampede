@@ -125,8 +125,12 @@ def test_strict_fees_skip_unknown_rows_and_estimate_fills_them(tmp_path):
     s = build(db)
     s.db.execute("UPDATE trades SET fee_raw=NULL, tax_raw=NULL, snipe_raw=NULL WHERE wallet=?", (W2,))
     s.commit()
-    strict = traders.run(s, args(db, min_trades=1, no_write=True), progress=lambda m: None)["stats"]["full"][W2]
+    res = traders.run(s, args(db, min_trades=1, no_write=True), progress=lambda m: None)
+    strict = res["stats"]["full"][W2]
     assert strict["fees_unknown"] == 3 and strict["positions_closed"] == 0 and strict["realized_eth"] == 0.0 and "fees_unknown" in strict["tags"]
+    # --no-write: the report still comes from tables (attached in-memory scratch database), the store itself stays untouched
+    assert "scratch database only" in res["report"] and "| 1 | `0x00000000…" in res["report"]
+    assert s.db.execute("SELECT COUNT(*) FROM sqlite_master WHERE name IN ('wallet_stats','wallet_positions')").fetchone()[0] == 0
     est = traders.run(s, args(db, min_trades=1, no_write=True, fees="estimate"), progress=lambda m: None)["stats"]["full"][W2]
     assert est["positions_closed"] == 1 and "fees_estimated" in est["tags"]
     # estimate: 1% base fee on every leg, creator tax unknown -> cost 1.5e17 * 1.01, proceeds 1e16 net

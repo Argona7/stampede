@@ -53,6 +53,7 @@ ETH_QUOTES = {chain.NATIVE, chain.WETH}
 INFRA = set(chain.KNOWN_INFRA) | {chain.PONS_V2_LOCKER, chain.PONS_V2_LAUNCH_DEPLOYER, chain.PONS_V2_FEE_ESCROW}
 QUALITY_WEIGHTS = {"win": 0.35, "roi": 0.25, "exit": 0.20, "rug": 0.20}
 QUALITY_SHRINK_N = 5  # quality = n/(n+5) * measured + 5/(n+5) * 0.5 over n closed positions
+KEEP_STATS_MAX_TRADES = 3_000_000  # below this many trades the wallet rows are also returned in memory (run()["stats"])
 
 TABLES = """
 CREATE TABLE IF NOT EXISTS wallet_stats (
@@ -518,9 +519,24 @@ STATS_COLS = [
     "weeks_active", "weeks_positive", "multi_coin_blocks", "is_bot", "deployer_linked", "quality", "tags", "pnl_by_quote",
     "first_ts", "last_ts", "fees_unknown", "unpriced", "unmatched_sells", "updated_at",
 ]
-STATS_INSERT = f"INSERT OR REPLACE INTO wallet_stats({','.join(STATS_COLS)}) VALUES({','.join('?' * len(STATS_COLS))})"
 POS_COLS = ["wallet", "token", "quote_token", "range_from", "range_to", "entry_ts", "exit_ts", "closed", "buys", "sells", "cost_quote", "proceeds_quote", "pnl_quote", "pnl_usd", "fees_quote", "unrealized_quote", "hold_s", "buyer_rank", "since_launch_s", "sniper", "snipe_paid", "exit_quality", "rug_after", "entry_tx", "exit_tx"]
-POS_INSERT = f"INSERT INTO wallet_positions({','.join(POS_COLS)}) VALUES({','.join('?' * len(POS_COLS))})"
+SCRATCH = "scratch"  # --no-write: the same tables in an attached in-memory database, so every downstream query is identical
+
+
+def stats_insert(prefix: str) -> str:
+    return f"INSERT OR REPLACE INTO {prefix}wallet_stats({','.join(STATS_COLS)}) VALUES({','.join('?' * len(STATS_COLS))})"
+
+
+def pos_insert(prefix: str) -> str:
+    return f"INSERT INTO {prefix}wallet_positions({','.join(POS_COLS)}) VALUES({','.join('?' * len(POS_COLS))})"
+
+
+def ensure_scratch(store: Store) -> str:
+    """Attach an in-memory database with the two tables; returns the table prefix to use."""
+    if not store.db.execute("SELECT COUNT(*) FROM pragma_database_list WHERE name=?", (SCRATCH,)).fetchone()[0]:
+        store.db.execute(f"ATTACH DATABASE ':memory:' AS {SCRATCH}")
+    store.db.executescript(TABLES.replace("CREATE TABLE IF NOT EXISTS ", f"CREATE TABLE IF NOT EXISTS {SCRATCH}.").replace("CREATE INDEX IF NOT EXISTS ", f"CREATE INDEX IF NOT EXISTS {SCRATCH}."))
+    return f"{SCRATCH}."
 
 
 def position_rows(wallet: str, led: dict[str, Any], lo: int, hi: int, marks: dict[str, dict[str, Any]], mark_key: str, qdec: dict[str, int], fx: Fx | None) -> list[tuple]:
@@ -543,8 +559,10 @@ def position_rows(wallet: str, led: dict[str, Any], lo: int, hi: int, marks: dic
     return out
 
 
-def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[str, Any]], facts: Facts, launches: Launches, fx: Fx | None, fees: str, run_ts: float, write: bool = True, positions_min_trades: int = 2, progress=None) -> dict[str, Any]:
-    """Streams trades ordered by (wallet, ts); writes wallet_stats (full, first half, second half) and wallet_positions (full)."""
+def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[str, Any]], facts: Facts, launches: Launches, fx: Fx | None, fees: str, run_ts: float, write: bool = True, positions_min_trades: int = 2, keep_stats: bool = False, progress=None) -> dict[str, Any]:
+    """Streams trades ordered by (wallet, ts); writes wallet_stats (full, first half, second half) and wallet_positions (full)
+    into the store, or into the attached scratch database when write=False. Rows stay in memory only with keep_stats
+    (small stores, tests); everything downstream reads the tables, so a 40M-row store never holds a million dicts."""
     q = store.db.execute
     qdec = {a: v["decimals"] for a, v in store.quotes().items()}
     contracts = {r[0] for r in q("SELECT address FROM wallets WHERE is_contract=1")}
@@ -552,10 +570,14 @@ def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[
     stats: dict[str, dict[str, dict[str, Any]]] = {"full": {}, "h1": {}, "h2": {}}
     if write:
         ensure_tables(store)
-        for _, a, b, _ in ranges:
-            store.db.execute("DELETE FROM wallet_stats WHERE range_from=? AND range_to=?", (a, b))
-        store.db.execute("DELETE FROM wallet_positions WHERE range_from=? AND range_to=?", (lo, hi))
-        store.commit()
+        prefix = ""
+    else:
+        prefix = ensure_scratch(store)
+    for _, a, b, _ in ranges:
+        store.db.execute(f"DELETE FROM {prefix}wallet_stats WHERE range_from=? AND range_to=?", (a, b))
+    store.db.execute(f"DELETE FROM {prefix}wallet_positions WHERE range_from=? AND range_to=?", (lo, hi))
+    store.commit()
+    ins_stats, ins_pos = stats_insert(prefix), pos_insert(prefix)
     cur = q("SELECT id, wallet, token, ts, block, side, token_amount, quote_token, quote_amount, venue, fee_raw, tax_raw, snipe_raw, tx_hash FROM trades WHERE ts>=? AND ts<=? ORDER BY wallet, ts", (lo, hi))
     buf: list[tuple] = []
     w: str | None = None
@@ -566,12 +588,11 @@ def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[
 
     def flush() -> None:
         nonlocal stat_batch, pos_batch
-        if write and stat_batch:
-            store.db.executemany(STATS_INSERT, stat_batch)
-        if write and pos_batch:
-            store.db.executemany(POS_INSERT, pos_batch)
-        if write:
-            store.commit()
+        if stat_batch:
+            store.db.executemany(ins_stats, stat_batch)
+        if pos_batch:
+            store.db.executemany(ins_pos, pos_batch)
+        store.commit()
         stat_batch, pos_batch = [], []
 
     def process(wallet: str, rows: list[tuple]) -> None:
@@ -585,7 +606,8 @@ def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[
             if led["trades"] == 0:
                 continue
             row = wallet_row(wallet, led, label, a, b, run_ts, launches, wallet in contracts, fees)
-            stats[label][wallet] = row
+            if keep_stats:
+                stats[label][wallet] = row
             stat_batch.append(tuple(row[c] for c in STATS_COLS))
             if label == "full" and led["trades"] >= positions_min_trades:
                 pos_batch.extend(position_rows(wallet, led, a, b, marks, mk, qdec, fx))
@@ -605,7 +627,32 @@ def wallet_pass(store: Store, lo: int, hi: int, mid: int, marks: dict[str, dict[
     if buf:
         process(w, buf)
     flush()
-    return {"stats": stats, "rows": n_rows, "wallets": n_wallets, "seconds": round(time.time() - t0, 1)}
+    return {"stats": stats, "rows": n_rows, "wallets": n_wallets, "seconds": round(time.time() - t0, 1), "prefix": prefix}
+
+
+HALF_COLS = ("trades", "pnl_eth", "realized_eth", "pnl_usd", "quality", "roi", "is_bot", "deployer_linked")
+
+
+def load_halves(store: Store, prefix: str, run_ts: float, min_trades: int) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Slim first-half / second-half rows of the wallets that qualify for the walk-forward (≥ min_trades first-half trades)
+    plus the counts of both halves; read from the tables so the 14-day run never keeps every wallet in memory."""
+    cols = ",".join(f"a.{c}" for c in HALF_COLS) + "," + ",".join(f"b.{c}" for c in HALF_COLS)
+    rows = store.db.execute(
+        f"SELECT a.wallet, {cols} FROM {prefix}wallet_stats a LEFT JOIN {prefix}wallet_stats b ON b.wallet=a.wallet AND b.label='h2' AND b.run_ts=a.run_ts WHERE a.label='h1' AND a.run_ts=? AND a.trades>=?",
+        (run_ts, min_trades),
+    ).fetchall()
+    h1: dict[str, dict[str, Any]] = {}
+    h2: dict[str, dict[str, Any]] = {}
+    n = len(HALF_COLS)
+    for r in rows:
+        h1[r[0]] = dict(zip(HALF_COLS, r[1 : 1 + n]))
+        if r[1 + n] is not None:
+            h2[r[0]] = dict(zip(HALF_COLS, r[1 + n :]))
+    return h1, h2
+
+
+def half_counts(store: Store, prefix: str, run_ts: float) -> dict[str, int]:
+    return dict(store.db.execute(f"SELECT label, COUNT(*) FROM {prefix}wallet_stats WHERE run_ts=? GROUP BY label", (run_ts,)).fetchall())
 
 
 # ---- walk-forward -----------------------------------------------------------------------------------------------
@@ -613,9 +660,10 @@ def eligible(row: dict[str, Any], min_trades: int) -> bool:
     return row["trades"] >= min_trades and not row["is_bot"] and not row["deployer_linked"]
 
 
-def walk_forward(h1: dict[str, dict[str, Any]], h2: dict[str, dict[str, Any]], min_trades: int, top_n: int = 50, seed: int = 7) -> dict[str, Any]:
+def walk_forward(h1: dict[str, dict[str, Any]], h2: dict[str, dict[str, Any]], min_trades: int, top_n: int = 50, seed: int = 7, counts: dict[str, int] | None = None) -> dict[str, Any]:
     common = [w for w, r in h1.items() if r["trades"] >= min_trades and w in h2]
-    out: dict[str, Any] = {"wallets_h1": len(h1), "wallets_h2": len(h2), "common": len(common), "min_trades": min_trades, "top_n": top_n}
+    counts = counts or {}
+    out: dict[str, Any] = {"wallets_h1": counts.get("h1", len(h1)), "wallets_h2": counts.get("h2", len(h2)), "common": len(common), "min_trades": min_trades, "top_n": top_n}
     if not common:
         return out
     pnl1 = [h1[w]["pnl_eth"] for w in common]
@@ -796,16 +844,16 @@ def copy_test(store: Store, leaders_by_k: dict[int, list[str]], lo: int, hi: int
 
 
 # ---- wallet_scores compatibility ---------------------------------------------------------------------------------
-def update_wallet_scores(store: Store, full: dict[str, dict[str, Any]], run_ts: float) -> int:
+def update_wallet_scores(store: Store, run_ts: float) -> int:
     """Bot flags and trade rates into wallet_scores without touching `score` (the walk-forward runner rate)."""
-    rows = [(w, r["is_bot"], r["trades_per_hour"], run_ts) for w, r in full.items() if r["is_bot"]]
-    store.db.executemany(
-        "INSERT INTO wallet_scores(wallet, rotations, runner_hits, score, is_bot, trades_per_hour, updated_at) VALUES(?,0,0,NULL,?,?,?) "
-        "ON CONFLICT(wallet) DO UPDATE SET is_bot=MAX(COALESCE(wallet_scores.is_bot, 0), excluded.is_bot), trades_per_hour=excluded.trades_per_hour, updated_at=excluded.updated_at",
-        rows,
+    cur = store.db.execute(
+        "INSERT INTO wallet_scores(wallet, rotations, runner_hits, score, is_bot, trades_per_hour, updated_at) "
+        "SELECT wallet, 0, 0, NULL, 1, trades_per_hour, run_ts FROM wallet_stats WHERE label='full' AND run_ts=? AND is_bot=1 "
+        "ON CONFLICT(wallet) DO UPDATE SET is_bot=1, trades_per_hour=excluded.trades_per_hour, updated_at=excluded.updated_at",
+        (run_ts,),
     )
     store.commit()
-    return len(rows)
+    return cur.rowcount if cur.rowcount is not None and cur.rowcount >= 0 else 0
 
 
 # ---- report -------------------------------------------------------------------------------------------------------
@@ -841,20 +889,26 @@ def leaderboard_table(rows: list[dict[str, Any]], title: str, n: int = 20) -> li
     return lines
 
 
-def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: dict[str, Any], wp: dict[str, Any], wf: dict[str, Any], ct: dict[str, Any], fx_rows: int, wrote_scores: int, t0: float) -> str:
-    full = wp["stats"]["full"]
-    h1, h2 = wp["stats"]["h1"], wp["stats"]["h2"]
-    n_trades = store.db.execute("SELECT COUNT(*) FROM trades WHERE ts>=? AND ts<=?", (lo, hi)).fetchone()[0]
-    rows = list(full.values())
-    fees_unknown = sum(r["fees_unknown"] for r in rows)
-    unpriced = sum(r["unpriced"] for r in rows)
-    bots = sum(1 for r in rows if r["is_bot"])
-    deployers = sum(1 for r in rows if r["deployer_linked"])
-    snipers = sum(1 for r in rows if "sniper" in r["tags"])
-    exempt = sum(1 for r in rows if "snipe_exempt" in r["tags"])
-    closed_total = sum(r["positions_closed"] for r in rows)
-    active = [r for r in rows if r["positions_closed"] >= 1 and r["cost_eth"] > 0]  # ETH-quoted traders with a round trip
-    winners = [r for r in active if r["pnl_eth"] > 0]
+def top_rows(store: Store, prefix: str, run_ts: float, where: str, order: str, args: tuple = (), n: int = 20) -> list[dict[str, Any]]:
+    rows = store.db.execute(f"SELECT {','.join(STATS_COLS)} FROM {prefix}wallet_stats WHERE label='full' AND run_ts=? AND {where} ORDER BY {order} LIMIT ?", (run_ts, *args, n)).fetchall()
+    return [dict(zip(STATS_COLS, r)) for r in rows]
+
+
+def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: dict[str, Any], wp: dict[str, Any], wf: dict[str, Any], ct: dict[str, Any], fx_rows: int, wrote_scores: int, t0: float, run_ts: float) -> str:
+    """The markdown report; every population number is an SQL aggregate over the written tables (no wallet dicts in memory)."""
+    q = store.db.execute
+    P = wp["prefix"]
+    n_trades = q("SELECT COUNT(*) FROM trades WHERE ts>=? AND ts<=?", (lo, hi)).fetchone()[0]
+    counts = half_counts(store, P, run_ts)
+    agg = q(
+        f"SELECT COUNT(*), SUM(fees_unknown), SUM(unpriced), SUM(is_bot), SUM(deployer_linked), SUM(tags LIKE '%\"sniper\"%'), SUM(tags LIKE '%\"snipe_exempt\"%'), SUM(positions_closed), SUM(cost_eth>0) "
+        f"FROM {P}wallet_stats WHERE label='full' AND run_ts=?",
+        (run_ts,),
+    ).fetchone()
+    n_wallets, fees_unknown, unpriced, bots, deployers, snipers, exempt, closed_total, eth_wallets = (int(x or 0) for x in agg)
+    # ETH-quoted traders with at least one round trip: the population the medians describe
+    active = q(f"SELECT pnl_eth, fees_eth, win_rate, exit_quality, rug_avoid, median_hold_s FROM {P}wallet_stats WHERE label='full' AND run_ts=? AND positions_closed>=1 AND cost_eth>0", (run_ts,)).fetchall()
+    winners = sum(1 for r in active if r[0] > 0)
     md: list[str] = []
     md.append("# Trader intelligence: who earns on PONS after fees, and does it persist?")
     md.append("")
@@ -865,9 +919,9 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
         md.append("")
     md.append("## Setup")
     md.append("")
-    md.append(f"- Data: {n_trades:,} trades by {wp['wallets']:,} non-infrastructure wallets on {tp['tokens']:,} coins, {fmt_ts(lo)}–{fmt_ts(hi)} UTC ({(hi - lo) / 3600:.1f} h). Walk-forward split at {fmt_ts(mid)} UTC (first half: {len(h1):,} wallets, second half: {len(h2):,}).")
+    md.append(f"- Data: {n_trades:,} trades by {wp['wallets']:,} non-infrastructure wallets on {tp['tokens']:,} coins, {fmt_ts(lo)}–{fmt_ts(hi)} UTC ({(hi - lo) / 3600:.1f} h). Walk-forward split at {fmt_ts(mid)} UTC (first half: {counts.get('h1', 0):,} wallets, second half: {counts.get('h2', 0):,}).")
     md.append(f"- Fees: `{a.fees}`. Rows without `fee_raw` on the curve: {fees_unknown:,} ({'skipped' if a.fees == 'strict' else 'base fee estimated at 1%, creator tax unknown'}); rows without a quote amount (multi-hop / two-sided transactions): {unpriced:,} counted as trades but not priced. Graduated-pool (v4) rows: fees sit inside the net amounts (the hook takes them in the unspecified currency), so they are not listed separately.")
-    md.append(f"- USD: {'fx_rates loaded (' + str(fx_rows) + ' hourly points); USD columns are filled where every leg has a rate' if fx_rows else 'no fx_rates in this store: USD columns are n/a (run `stampede fx --db ...`)'}. PnL is stated in quote units first; the ETH columns cover positions quoted in native ETH/WETH ({sum(1 for r in rows if r['cost_eth'] > 0):,} wallets); other quote assets are kept per asset in `pnl_by_quote`.")
+    md.append(f"- USD: {'fx_rates loaded (' + str(fx_rows) + ' hourly points); USD columns are filled where every leg has a rate' if fx_rows else 'no fx_rates in this store: USD columns are n/a (run `stampede fx --db ...`)'}. PnL is stated in quote units first; the ETH columns cover positions quoted in native ETH/WETH ({eth_wallets:,} wallets); other quote assets are kept per asset in `pnl_by_quote`.")
     md.append(f"- Wallets tagged: {bots:,} bots (> {BOT_TRADES_PER_HOUR} trades/h over their active span, > {BOT_TRADES} trades, or ≥ {BOT_MULTI_COIN_BLOCKS} blocks with buys of several coins), {deployers:,} deployer-linked (deployer of a coin they traded, or bought without snipe tax while later buyers still paid it: {exempt:,}), {snipers:,} snipers (≥ 30% of entries under {SNIPE_S} s after launch or with snipe tax paid).")
     md.append(f"- Positions: {closed_total:,} closed (wallet, coin) episodes; a position closes when ≤ {int(DUST_SHARE * 100)}% of its peak inventory is left (the dust is written off). Sells without matching lots (tokens received by transfer, or bought before the range) are ignored, never counted as profit.")
     md.append(f"- Compute: token pass {tp['seconds']} s, wallet pass {wp['seconds']} s, total {time.time() - t0:.0f} s.")
@@ -881,21 +935,21 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
     md.append("")
     md.append("## Population")
     md.append("")
-    md.append(f"- {len(rows):,} wallets with ≥ 1 trade; {len(active):,} traded ETH-quoted coins and closed ≥ 1 position; of those {len(winners):,} ({pct(len(winners) / len(active) if active else None)}) ended the range with a positive ETH PnL (realized + unrealized). Wallets quoted only in other assets are counted in the leaderboards by their per-asset sums, not here.")
+    md.append(f"- {n_wallets:,} wallets with ≥ 1 trade; {len(active):,} traded ETH-quoted coins and closed ≥ 1 position; of those {winners:,} ({pct(winners / len(active) if active else None)}) ended the range with a positive ETH PnL (realized + unrealized). Wallets quoted only in other assets are counted in the leaderboards by their per-asset sums, not here.")
     if active:
-        pnls = sorted(r["pnl_eth"] for r in active)
-        md.append(f"- ETH PnL across wallets with a closed position: median {median(pnls):+.4f} ETH, mean {sum(pnls) / len(pnls):+.4f}, sum {sum(pnls):+.2f}; fees paid {sum(r['fees_eth'] for r in active):.2f} ETH.")
-        wr = [r["win_rate"] for r in active if r["win_rate"] is not None]
-        eq = [r["exit_quality"] for r in active if r["exit_quality"] is not None]
-        ra = [r["rug_avoid"] for r in active if r["rug_avoid"] is not None]
-        md.append(f"- Median win rate {pct(median(wr))}, median exit quality {num(median(eq), 2)}, median rug-avoidance share {pct(median(ra))}, median hold {dur(median([r['median_hold_s'] for r in active if r['median_hold_s'] is not None]))}.")
+        pnls = [r[0] for r in active]
+        md.append(f"- ETH PnL across wallets with a closed position: median {median(pnls):+.4f} ETH, mean {sum(pnls) / len(pnls):+.4f}, sum {sum(pnls):+.2f}; fees paid {sum(r[1] for r in active):.2f} ETH.")
+        wr = [r[2] for r in active if r[2] is not None]
+        eq = [r[3] for r in active if r[3] is not None]
+        ra = [r[4] for r in active if r[4] is not None]
+        md.append(f"- Median win rate {pct(median(wr))}, median exit quality {num(median(eq), 2)}, median rug-avoidance share {pct(median(ra))}, median hold {dur(median([r[5] for r in active if r[5] is not None]))}.")
     md.append("")
     md.append("## Leaderboards (full range)")
     md.append("")
-    md += leaderboard_table(sorted(rows, key=lambda r: -r["pnl_eth"]), "Top by ETH PnL (realized + unrealized), every wallet")
-    md += leaderboard_table(sorted([r for r in rows if eligible(r, a.min_trades)], key=lambda r: (-r["quality"], -r["pnl_eth"])), f"Top by quality · ≥ {a.min_trades} trades · no bots, no deployer-linked")
-    md += leaderboard_table(sorted([r for r in rows if "sniper" in r["tags"]], key=lambda r: -r["pnl_eth"]), "Snipers by ETH PnL")
-    md += leaderboard_table(sorted([r for r in rows if r["is_bot"]], key=lambda r: -r["pnl_eth"]), "Bots by ETH PnL")
+    md += leaderboard_table(top_rows(store, P, run_ts, "1=1", "pnl_eth DESC"), "Top by ETH PnL (realized + unrealized), every wallet")
+    md += leaderboard_table(top_rows(store, P, run_ts, "trades>=? AND is_bot=0 AND deployer_linked=0", "quality DESC, pnl_eth DESC", (a.min_trades,)), f"Top by quality · ≥ {a.min_trades} trades · no bots, no deployer-linked")
+    md += leaderboard_table(top_rows(store, P, run_ts, "tags LIKE '%\"sniper\"%'", "pnl_eth DESC"), "Snipers by ETH PnL")
+    md += leaderboard_table(top_rows(store, P, run_ts, "is_bot=1", "pnl_eth DESC"), "Bots by ETH PnL")
     md.append("## Walk-forward: first half → second half")
     md.append("")
     md.append(f"Stats are built on {fmt_ts(lo)}–{fmt_ts(mid)} and the same wallets are measured again on {fmt_ts(mid)}–{fmt_ts(hi)} UTC (positions opened in the second half only; open lots marked at the end of each half). Wallets with ≥ {wf.get('min_trades')} first-half trades that traded again in the second half: **{wf.get('common', 0):,}**; eligible for the top lists (not bot, not deployer-linked): {wf.get('eligible', 0):,}.")
@@ -956,7 +1010,7 @@ def report(a: argparse.Namespace, store: Store, lo: int, hi: int, mid: int, tp: 
     md.append("# then: GET /api/traders?preset=smart · GET /api/wallet/<address> · web TRADERS view (key 4) · TUI screen 3")
     md.append("```")
     md.append("")
-    md.append(f"Written: wallet_stats {sum(len(v) for v in wp['stats'].values()):,} rows (full / first half / second half), wallet_positions for wallets with ≥ 2 trades, wallet_scores bot flags for {wrote_scores:,} wallets (`score` untouched).")
+    md.append(f"Written: wallet_stats {sum(counts.values()):,} rows (full / first half / second half), wallet_positions for wallets with ≥ 2 trades, wallet_scores bot flags for {wrote_scores:,} wallets (`score` untouched){' — into the scratch database only (--no-write)' if P else ''}.")
     return "\n".join(md)
 
 
@@ -979,15 +1033,18 @@ def run(store: Store, a: argparse.Namespace, progress=print) -> dict[str, Any]:
     fx_rows = q("SELECT COUNT(*) FROM fx_rates").fetchone()[0]
     fx = Fx(store) if fx_rows else None
     run_ts = time.time()
-    wp = wallet_pass(store, lo, hi, mid, tp["marks"], facts, launches, fx, a.fees, run_ts, write=not a.no_write, progress=progress)
+    keep = bool(getattr(a, "keep_stats", False)) or tp["rows"] <= KEEP_STATS_MAX_TRADES
+    wp = wallet_pass(store, lo, hi, mid, tp["marks"], facts, launches, fx, a.fees, run_ts, write=not a.no_write, positions_min_trades=a.positions_min_trades, keep_stats=keep, progress=progress)
     progress(f"wallet pass done: {wp['rows']:,} trades, {wp['wallets']:,} wallets, {wp['seconds']} s")
-    wf = walk_forward(wp["stats"]["h1"], wp["stats"]["h2"], a.min_trades, a.top, a.seed)
+    h1, h2 = load_halves(store, wp["prefix"], run_ts, a.min_trades)
+    wf = walk_forward(h1, h2, a.min_trades, a.top, a.seed, counts=half_counts(store, wp["prefix"], run_ts))
     ks = [int(k) for k in str(a.copy_k).split(",") if k.strip()]
     top = wf.get("top_wallets", [])
     ct = copy_test(store, {k: top[:k] for k in ks}, mid, hi, launches, int(a.order_eth * 1e18), a.hold_s, history_from=lo)
-    wrote = update_wallet_scores(store, wp["stats"]["full"], run_ts) if not a.no_write else 0
-    text = report(a, store, lo, hi, mid, tp, wp, wf, ct, fx_rows, wrote, t0)
-    return {"lo": lo, "hi": hi, "mid": mid, "token_pass": tp, "wallet_pass": {k: v for k, v in wp.items() if k != "stats"}, "walk_forward": {k: v for k, v in wf.items() if k != "top_wallets"}, "copy_test": ct, "report": text, "stats": wp["stats"]}
+    progress(f"walk-forward: {wf.get('common', 0):,} common wallets; copy-test: {ct['priced']:,} priced copy trades")
+    wrote = update_wallet_scores(store, run_ts) if not a.no_write else 0
+    text = report(a, store, lo, hi, mid, tp, wp, wf, ct, fx_rows, wrote, t0, run_ts)
+    return {"lo": lo, "hi": hi, "mid": mid, "run_ts": run_ts, "token_pass": tp, "wallet_pass": {k: v for k, v in wp.items() if k != "stats"}, "walk_forward": {k: v for k, v in wf.items() if k != "top_wallets"}, "copy_test": ct, "report": text, "stats": wp["stats"]}
 
 
 def build_parser(ap: argparse.ArgumentParser | None = None) -> argparse.ArgumentParser:
@@ -1003,7 +1060,9 @@ def build_parser(ap: argparse.ArgumentParser | None = None) -> argparse.Argument
     ap.add_argument("--order-eth", type=float, default=0.02)
     ap.add_argument("--hold-s", type=int, default=COPY_HOLD_S)
     ap.add_argument("--seed", type=int, default=7)
-    ap.add_argument("--no-write", action="store_true", help="do not write wallet_stats / wallet_positions / wallet_scores")
+    ap.add_argument("--no-write", action="store_true", help="do not write wallet_stats / wallet_positions / wallet_scores into the store (an attached in-memory database is used instead)")
+    ap.add_argument("--positions-min-trades", type=int, default=2, help="write wallet_positions only for wallets with at least this many trades")
+    ap.add_argument("--keep-stats", action="store_true", help="also keep every wallet row in memory (small stores; tests)")
     ap.add_argument("--json", default="", help="also write the numbers as json here")
     ap.add_argument("--note", default="", help="one line shown at the top of the report (which store, what is provisional)")
     return ap
