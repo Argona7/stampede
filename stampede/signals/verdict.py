@@ -21,6 +21,12 @@ from typing import Any
 
 from . import risk
 
+# The model is called for a handful of rows every ~100 ms inside the realtime engine. libomp's default wait policy keeps
+# its worker threads spinning for 200 ms after every parallel region, which burned a whole core in the live engine
+# (docs/TRACK-RECORD.md run notes); passive waiting costs nothing here because the batched call runs single-threaded anyway.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+os.environ.setdefault("KMP_BLOCKTIME", "0")
+
 CONFIG_PATH = Path(__file__).resolve().parent / "edge-config.json"
 ENTER, WAIT, AVOID = "ENTER", "WAIT", "AVOID"
 RULE_BUCKETS: dict[str, list[tuple[float, float]]] = {

@@ -163,6 +163,10 @@ class Writer(threading.Thread):
             if rows:
                 db.executemany(sql, rows)
                 bt[name] += len(rows)
+        for sql, params in b.sql:  # paper ledger rows (positions, fills, equity), in order
+            db.execute(sql, params)
+        if b.sql:
+            bt["paper"] += len(b.sql)
         for k, v in b.meta.items():
             db.execute("INSERT OR REPLACE INTO meta(key,value) VALUES(?,?)", (k, json.dumps(v)))
         db.commit()
@@ -171,12 +175,13 @@ class Writer(threading.Thread):
 class Engine:
     """Drop-in for `LiveTail` inside the API process: `.status`, `.start()`, `.stop()`, plus `.perf()` and the bus."""
 
-    def __init__(self, db_path: Path | str, window_s: int = 1800, span_s: int = 1800, bus: Bus | None = None, endpoints=ENDPOINTS, persist_logs: bool = True, rpc_factory=None):
+    def __init__(self, db_path: Path | str, window_s: int = 1800, span_s: int = 1800, bus: Bus | None = None, endpoints=ENDPOINTS, persist_logs: bool = True, rpc_factory=None, notify: bool = False):
         self.db_path = Path(db_path)
         self.window_s, self.span_s = window_s, span_s
         self.bus = bus or Bus()
         self.endpoints = list(endpoints)
         self.persist_logs = persist_logs
+        self.notify = notify  # macOS notification (osascript) when an alert rule fires; off the block path
         self.rpc_factory = rpc_factory
         self.status: dict[str, Any] = {
             "engine": "wss",
@@ -209,6 +214,7 @@ class Engine:
         self.resolver_stats: Counter = Counter()
         self._stop = threading.Event()
         self._cpu_last: tuple[float, float] | None = None
+        self._lag_ewma: float | None = None  # smoothed head -> last event latency of live blocks (the session's `lag_ms`)
         self._threads: list[threading.Thread] = []
 
     # ---- lifecycle ----
@@ -241,6 +247,9 @@ class Engine:
             self.status["catchup_s"] = round(time.time() - t1, 1)
         self.started_at = time.time()
         self.status["running"] = True
+        wb0 = WriteBatch()
+        wb0.meta["engine_started_at"] = int(self.started_at)  # the track record reports from the latest start by default
+        self.writer.enqueue(wb0)
         self.status["backfill_available"] = backfill is not None
         for target, name in ((self._proc_loop, "engine-proc"), (self._resolver_loop, "engine-resolve"), (self._refresh_loop, "engine-refresh")):
             t = threading.Thread(target=target, name=name, daemon=True)
@@ -286,6 +295,10 @@ class Engine:
                 for typ, data in events:
                     bus.publish(typ, block.number, data)
                 t_emit = time.time()
+                if self.notify:
+                    for typ, data in events:
+                        if typ == "alert" and data.get("kind") == "fired":
+                            self._notify_alert(data)
                 self.writer.enqueue(wb)
                 self._account(block, tm, t_got, t_emit, events)
                 if time.time() - last_full >= FULL_SNAPSHOT_S:
@@ -336,12 +349,32 @@ class Engine:
             self.hist["head_to_logs_complete"].add((block.t_logs_complete - block.t_head_received) * 1000)
             self.hist["logs_to_trades"].add((tm["t_trades"] - block.t_logs_complete) * 1000)
             self.hist["trades_to_radar"].add((tm["t_radar"] - tm["t_trades"]) * 1000)
-            self.hist["block_to_emit"].add((t_emit - block.t_head_received) * 1000)
+            lag = (t_emit - block.t_head_received) * 1000
+            self.hist["block_to_emit"].add(lag)
+            self._lag_ewma = lag if self._lag_ewma is None else self._lag_ewma * 0.9 + lag * 0.1
         else:
             self.hist["block_to_emit_backfill"].add((t_emit - block.t_first_seen) * 1000)
         if block.source == "unfilled":
             self.status["gaps"].append([block.number, block.number, "not indexed: gap backfill failed (see /api/perf)"])
             del self.status["gaps"][:-50]
+
+    def _notify_alert(self, a: dict[str, Any]) -> None:
+        """macOS notification for a fired alert (title `STAMPEDE · ENTER <symbol>` for the edge rule); osascript runs in its
+        own thread so the block path never waits for it. Clicking the banner opens nothing."""
+        d = a.get("detail") or {}
+        sym = str(a.get("symbol") or "?")
+        if a.get("rule") == "edge_enter":
+            p = d.get("p_2x_30m")
+            size = d.get("size_quote")
+            plan = " · ".join(str(x) for x in (d.get("exit_plan") or [])[:4])
+            title = f"STAMPEDE · ENTER {sym}"
+            body = f"p(2×/30m) {p * 100:.0f}% · size {size:.4f} ETH · {plan}" if p is not None and size is not None else f"verdict ENTER · {plan}"
+        else:
+            title = f"STAMPEDE · {sym}"
+            m1h = a.get("mentions_1h")
+            body = f"{a.get('inflow')} wallets rotated in (10 min) · score {float(a.get('score') or 0):.0f} · X 1h: {m1h if m1h is not None else 'n/a'}"
+        self.counts["notifications"] += 1
+        threading.Thread(target=notify_macos, args=(title, body), name="engine-notify", daemon=True).start()
 
     def _publish_session(self) -> None:
         st = self.state
@@ -372,6 +405,8 @@ class Engine:
             "window_s": st.window_s if st else self.window_s,
             "span_s": st.span_s if st else self.span_s,
             "server_time": int(time.time()),
+            "lag_ms": round(self._lag_ewma, 1) if self._lag_ewma is not None else None,
+            "paper": st.paper.summary() if (st is not None and st.paper is not None) else None,
         })
 
     # ---- resolver: symbols, unknown curves, reserve snapshots, lifecycle catch-up (never on the block path) ----
@@ -595,7 +630,20 @@ class Engine:
         }
 
 
-def live_source(db_path: Path | str, app_state: dict[str, Any], feed: str = "wss"):
+def notify_macos(title: str, text: str) -> None:
+    """`display notification` through osascript (the same helper the context worker used); quotes are sanitized so a
+    symbol cannot break out of the AppleScript string."""
+
+    def clean(s: str) -> str:
+        return s.replace("\\", "/").replace('"', "'").replace("\n", " ")[:200]
+
+    try:
+        subprocess.run(["osascript", "-e", f'display notification "{clean(text)}" with title "{clean(title)}"'], timeout=5, check=False, capture_output=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def live_source(db_path: Path | str, app_state: dict[str, Any], feed: str = "wss", notify: bool = False):
     """What `serve --mode live` starts: the websocket engine (default) or the polling `LiveTail` (`--feed alchemy`)."""
     if feed == "wss":
         try:
@@ -605,7 +653,7 @@ def live_source(db_path: Path | str, app_state: dict[str, Any], feed: str = "wss
             feed = "alchemy"
     if feed == "wss":
         bus = app_state.setdefault("bus", Bus())
-        return Engine(db_path, window_s=app_state["window_s"], bus=bus, persist_logs=env("STAMPEDE_ENGINE_LOGS", "1") != "0")
+        return Engine(db_path, window_s=app_state["window_s"], bus=bus, persist_logs=env("STAMPEDE_ENGINE_LOGS", "1") != "0", notify=notify)
     from ..api.live import LiveTail
 
     return LiveTail(db_path, window_s=app_state["window_s"])

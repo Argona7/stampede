@@ -14,7 +14,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from typing import Any
 
-EVENT_TYPES = ("block", "trade", "sequence", "radar_delta", "alert", "verdict", "session")
+EVENT_TYPES = ("block", "trade", "sequence", "radar_delta", "alert", "verdict", "position", "session")
 RING_SIZE = 5000
 
 

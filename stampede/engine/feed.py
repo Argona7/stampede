@@ -567,6 +567,11 @@ class SubscriptionStalled(RuntimeError):
     """The connection is open but a subscription stopped delivering: reconnect, and prefer the other endpoint."""
 
 
+class ReturnToPreferred(RuntimeError):
+    """A failover connection has been stable long enough: reconnect on the preferred endpoint (its heads lead the
+    failover's by seconds); the blocks around the switch are refilled by the ordinary reconnect gap path."""
+
+
 class Feed:
     """Runs the two websocket connections and the assembler on its own asyncio loop (thread `engine-feed`);
     released blocks go to `out` (a thread-safe queue) for the processor."""
@@ -580,6 +585,7 @@ class Feed:
         start_from: int | None = None,
         max_catchup: int = MAX_CATCHUP_BLOCKS,
         stable_after_s: float = 30.0,
+        return_after_s: float = 600.0,
     ):
         self.out = out
         self.asm = assembler
@@ -588,6 +594,8 @@ class Feed:
         self.start_from = start_from
         self.max_catchup = max_catchup
         self.stable_after_s = stable_after_s
+        self.return_after_s = return_after_s  # on a failover endpoint for this long without trouble -> try the preferred one again
+        self.returns = 0
         self.metrics = {"fast": ConnMetrics(), "bulk": ConnMetrics()}
         self.head_gap_ms = Histogram()
         self.backfill_ms = Histogram()
@@ -654,6 +662,14 @@ class Feed:
                     await self._recv(ws, role, names, m)
             except asyncio.CancelledError:
                 raise
+            except ReturnToPreferred:
+                self.returns += 1
+                m.connected = False
+                m.subscriptions = {}
+                m.last_error = f"returned to the preferred endpoint after {int(time.time() - t_open)} s on the failover"
+                fails = 0  # endpoints[0] next; if it refuses, the ordinary backoff takes the failover again
+                await asyncio.sleep(0.05)
+                continue
             except SubscriptionStalled as e:
                 stalled = True
                 m.stalls += 1
@@ -731,6 +747,8 @@ class Feed:
                     raise SubscriptionStalled("heads keep coming but the log subscriptions delivered nothing for 60 blocks that should have PONS logs")
                 if role == "bulk" and self.asm.bulk_dead:
                     raise SubscriptionStalled(f"transfer stream {self.asm.last_head - self.asm.bulk_max} blocks behind the heads")
+            if self.return_after_s and len(self.endpoints) > 1 and m.endpoint != self.endpoints[0] and t - (m.connected_since or t) >= self.return_after_s:
+                raise ReturnToPreferred(m.endpoint or "")
 
     def _on_head(self, r: dict[str, Any], t: float) -> None:
         if self.first_head is None:
@@ -809,6 +827,7 @@ class Feed:
             "reconnects": sum(max(0, m.connects - 1) for m in self.metrics.values()),
             "failovers": sum(m.failovers for m in self.metrics.values()),
             "stalls": sum(m.stalls for m in self.metrics.values()),
+            "returns_to_preferred": self.returns,
             "fast_health": {"window": len(self.asm.fast_health), "with_logs": sum(self.asm.fast_health), "empty_since": self.asm.fast_empty_since},
             "first_head": self.first_head,
             "last_head": self.asm.last_head,

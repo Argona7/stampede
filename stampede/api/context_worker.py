@@ -21,7 +21,7 @@ from . import radar as radar_mod
 
 
 class ContextWorker(threading.Thread):
-    def __init__(self, db_path, clock_fn: Callable[[], int | None], mode: str, window_s: int, span_s: int, api_key: str | None, rpc_factory: Callable[[], Any], context_policy: str = "live", notify: bool = False, top_n: int = 30):
+    def __init__(self, db_path, clock_fn: Callable[[], int | None], mode: str, window_s: int, span_s: int, api_key: str | None, rpc_factory: Callable[[], Any], context_policy: str = "live", notify: bool = False, top_n: int = 30, alerts: bool = True):
         super().__init__(daemon=True, name="context-worker")
         self.db_path = db_path
         self.clock_fn = clock_fn
@@ -33,7 +33,10 @@ class ContextWorker(threading.Thread):
         self.policy = context_policy
         self.notify = notify
         self.top_n = top_n
-        self.status: dict[str, Any] = {"running": False, "last_cycle": None, "last_error": None, "cycles": 0, "context_enabled": False, "alerts_fired": 0}
+        # False when the websocket engine runs in the same process: it evaluates both rules per block from memory and
+        # settles the outcomes itself, so the SQL path here would only duplicate alerts behind its own write lock
+        self.alerts_enabled = alerts
+        self.status: dict[str, Any] = {"running": False, "last_cycle": None, "last_error": None, "cycles": 0, "context_enabled": False, "alerts_fired": 0, "alerts_enabled": alerts}
         self._stop = threading.Event()
         self.rules = {
             "under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100},  # inflow 8-40 & age < 1 h & not already +100%: 20% runner rate (3.8x base) in docs/RESEARCH-RUNNERS.md
@@ -77,7 +80,8 @@ class ContextWorker(threading.Thread):
                                 fetch_holders(store, rpc, tok, head, max_age_s=600)
                             if i < 10:
                                 launch_socials(store, rpc, tok)
-                    self._alerts(store, clock, rad, xm)
+                    if self.alerts_enabled:
+                        self._alerts(store, clock, rad, xm)
                 self.status["last_cycle"] = time.time()
                 self.status["cycles"] += 1
                 self.status["last_error"] = None

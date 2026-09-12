@@ -47,7 +47,7 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
     if mode == "live":
         from ..engine.runner import live_source
 
-        tail = live_source(path, state, feed) if feed == "wss" else LiveTail(path, window_s=state["window_s"])  # websocket engine (stage 6) or the polling tail
+        tail = live_source(path, state, feed, notify=notify) if feed == "wss" else LiveTail(path, window_s=state["window_s"])  # websocket engine (stage 6) or the polling tail
         tail.start()
         state["live"] = tail
 
@@ -129,19 +129,28 @@ def create_app(mode: str = "fixture", window: str = "30m", db: Path | None = Non
         st = session_state()
         return st["clock_ts"] if st["clock_ts"] is not None else (int(time.time()) if mode == "live" else None)
 
-    worker = ContextWorker(path, clock_now, mode, state["window_s"], 1800, _env("TWITTERAPI_KEY"), _rpc, context_policy=context_policy, notify=notify)
+    # the websocket engine journals both alert rules per block from memory (and notifies); the worker's SQL path stays only
+    # for the polling tail and for replay, so a coin is never journaled twice behind the worker's write lock
+    engine_alerts = state["live"] is not None and hasattr(state["live"], "perf")
+    worker = ContextWorker(path, clock_now, mode, state["window_s"], 1800, _env("TWITTERAPI_KEY"), _rpc, context_policy=context_policy, notify=notify and not engine_alerts, alerts=not engine_alerts)
     worker.start()
     state["worker"] = worker
+    from .paper_api import install as install_paper
     from .stream import install as install_stream
 
     install_stream(app, state)  # GET /api/stream (SSE) + GET /api/perf (stage 6 engine); must precede the SPA catch-all
+    install_paper(app, state, store)  # GET /api/paper + GET /api/track-record (stage 7 paper ledger)
 
     radar_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
     radar_lock = threading.Lock()
 
     def radar_rows_cached(s: Store, w: int, clock: int, sp: int, exclude_bots: bool, ttl: float = 4.0) -> list[dict[str, Any]]:
-        """One expensive computation per (clock, window, span) at a time; others reuse it for a few seconds."""
+        """One expensive computation per (clock, window, span) at a time; others reuse it for a few seconds. Outside live
+        mode the store behind a given clock never changes, so a cached key stays valid until the cache is cleared (a
+        paused replay used to recompute the same 30-s ranking every 4 s)."""
         key = f"{w}:{clock}:{sp}:{int(exclude_bots)}"
+        if mode != "live":
+            ttl = float("inf")
         hit = radar_cache.get(key)
         if hit and time.time() - hit[0] < ttl:
             return hit[1]

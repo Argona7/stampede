@@ -28,6 +28,7 @@ from ..normalize import TRADE_COLUMNS, Context, Trade, trades_from_tx
 from ..rotation import T, sequences_for_wallet
 from ..store import Store
 from .feed import SWAP_KINDS, Block
+from .paper import PaperLedger
 
 MAIN = ("direct", "clean")
 TRADE_INSERT_ID = f"INSERT OR IGNORE INTO trades(id,{TRADE_COLUMNS}) VALUES({','.join('?' * (len(TRADE_COLUMNS.split(',')) + 1))})"
@@ -45,7 +46,11 @@ ALERT_UPDATE = "UPDATE alerts SET outcome_30m=COALESCE(?, outcome_30m), outcome_
 ALERT_SYMBOL = "UPDATE alerts SET symbol=? WHERE mode='live' AND token=? AND (symbol IS NULL OR symbol='?')"
 WALLET_UPSERT = "INSERT INTO wallets(address,is_contract,trades) VALUES(?,NULL,?) ON CONFLICT(address) DO UPDATE SET trades=wallets.trades+excluded.trades"
 # the alert rule of the context worker (docs/RADAR.md); the same parameters, evaluated per block here
-RULES = {"under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100}}
+RULES = {
+    "under_radar_top5": {"score_min": 60, "mentions_max": 3, "rank_max": 5, "inflow_min": 8, "inflow_max": 40, "age_max_s": 3600, "chg_10m_max": 100},
+    # stage 4/5 (docs/RESEARCH-EDGE.md): verdict ENTER, at most `per_hour` alerts per clock hour ranked by p, one per coin per 30 min
+    "edge_enter": {"per_hour": 5, "dedupe_s": 1800},
+}
 
 
 @dataclass
@@ -62,8 +67,11 @@ class CurveReserve:
     sells: int = 0
     last_ts: int = 0
     graduated: bool = False
+    tax_bps: int | None = None  # creator tax rate observed on the curve's own events (the paper ledger's fill uses it)
 
     def apply_buy(self, quote_in: int, tokens_out: int, fee: int, tax: int, block: int = 0, ts: int = 0) -> None:
+        if quote_in > 0:
+            self.tax_bps = tax * 10_000 // quote_in
         if self.synced_block is not None and block <= self.synced_block:
             return
         self.quote += quote_in - fee - tax
@@ -72,6 +80,9 @@ class CurveReserve:
         self.last_ts = ts
 
     def apply_sell(self, tokens_in: int, quote_out: int, fee: int, tax: int, block: int = 0, ts: int = 0) -> None:
+        gross = quote_out + fee + tax
+        if gross > 0:
+            self.tax_bps = tax * 10_000 // gross
         if self.synced_block is not None and block <= self.synced_block:
             return
         self.quote -= quote_out + fee + tax
@@ -135,11 +146,12 @@ class WriteBatch:
     alert_updates: list[tuple] = field(default_factory=list)
     alert_symbols: list[tuple] = field(default_factory=list)  # (symbol, token): a coin alerted before its symbol resolved
     token_meta: list[tuple] = field(default_factory=list)  # (symbol, name, address)
+    sql: list[tuple[str, tuple]] = field(default_factory=list)  # (statement, params) run in order inside the same transaction (paper ledger)
     wallets: Counter = field(default_factory=Counter)
     meta: dict[str, Any] = field(default_factory=dict)
     created: float = field(default_factory=time.time)
 
-    LISTS = ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "alert_symbols", "token_meta")
+    LISTS = ("trades", "sequences", "blocks", "logs", "launches", "graduations_pool", "graduations_ignore", "curves", "tokens", "pools", "infra", "alerts", "alert_updates", "alert_symbols", "token_meta", "sql")
 
     def extend(self, o: "WriteBatch") -> None:
         for k in self.LISTS:
@@ -149,7 +161,7 @@ class WriteBatch:
         self.created = min(self.created, o.created)
 
     def rows(self) -> int:
-        return sum(len(getattr(self, k)) for k in self.LISTS) + len(self.wallets)
+        return sum(len(getattr(self, k)) for k in self.LISTS) + len(self.wallets) + len(self.meta)
 
 
 @dataclass
@@ -165,7 +177,7 @@ class PendingAlert:
 
 
 class EngineState:
-    def __init__(self, store: Store, window_s: int = 1800, span_s: int = 1800, ring_s: int = 7200, rules: dict[str, dict[str, Any]] | None = None, persist_logs: bool = True):
+    def __init__(self, store: Store, window_s: int = 1800, span_s: int = 1800, ring_s: int = 7200, rules: dict[str, dict[str, Any]] | None = None, persist_logs: bool = True, paper: bool = True):
         self.window_s, self.span_s, self.ring_s = window_s, span_s, ring_s
         self.rules = rules or RULES
         self.persist_logs = persist_logs
@@ -227,7 +239,17 @@ class EngineState:
         self.tokens_needing_meta: set[str] = set()
         self.alert_recent: dict[str, int] = {}
         self.alert_pending: list[PendingAlert] = []
+        self.edge_recent: dict[str, int] = {}  # token -> clock of the last edge_enter alert (30-min rule, per rule like the worker)
+        self.edge_times: deque[int] = deque()  # clocks of the edge_enter alerts of the last hour (the per-hour cap)
         self.load_alerts(store)
+        # stage 7: the paper ledger opens a simulated position on every engine edge_enter alert (docs: engine/paper.py)
+        self.paper: PaperLedger | None = None
+        if paper:
+            try:
+                self.paper = PaperLedger(store, qdec=self.qdec)
+            except Exception as e:  # noqa: BLE001 - the ledger must never keep the engine from starting
+                self.stats["paper_init_error"] = 1
+                self.notes[f"paper_init_error: {type(e).__name__}: {str(e)[:80]}"] += 1
         self.stats["curves_seeded"] = len(curves)
         self.stats["pools_seeded"] = len(pool_token)
         self.stats["launches_seeded"] = len(self.launches)
@@ -283,8 +305,13 @@ class EngineState:
 
     def load_alerts(self, store: Store) -> None:
         now = int(time.time())
-        for tok, cts in store.db.execute("SELECT token, MAX(clock_ts) FROM alerts WHERE mode='live' AND clock_ts>? GROUP BY token", (now - 1800,)):
+        for tok, cts in store.db.execute("SELECT token, MAX(clock_ts) FROM alerts WHERE mode='live' AND rule='under_radar_top5' AND clock_ts>? GROUP BY token", (now - 1800,)):
             self.alert_recent[tok] = cts
+        for tok, cts in store.db.execute("SELECT token, MAX(clock_ts) FROM alerts WHERE mode='live' AND rule='edge_enter' AND clock_ts>? GROUP BY token", (now - 1800,)):
+            self.edge_recent[tok] = cts
+        for (cts,) in store.db.execute("SELECT clock_ts FROM alerts WHERE mode='live' AND rule='edge_enter' AND clock_ts>? ORDER BY clock_ts", (now - 3600,)):
+            if cts not in self.edge_times:
+                self.edge_times.append(cts)
         known = {(p.token, p.clock_ts) for p in self.alert_pending}
         for tok, cts, price, sym, o30, o60 in store.db.execute("SELECT token, clock_ts, price, symbol, outcome_30m, outcome_60m FROM alerts WHERE mode='live' AND (outcome_30m IS NULL OR outcome_60m IS NULL) AND clock_ts>?", (now - 3 * 3600,)):
             if (tok, cts) in known:
@@ -453,10 +480,31 @@ class EngineState:
         rank_of = {r["address"]: i for i, r in enumerate(self.ranked, 1)}
         for r in self.rows.values():
             r["rank"] = rank_of.get(r["address"])
+        if self.paper is not None and need_verdict:
+            tracked = self.paper.tracked_tokens()
+            if tracked:  # the exit-now triggers of open paper positions read the same feature dict the verdict consumes
+                for r in need_verdict:
+                    if r["address"] in tracked and r.get("_vf"):
+                        self.paper.features[r["address"]] = dict(r["_vf"])
         verdict_changes = self._attach_verdicts(need_verdict, block.number, clock)
         t_radar = time.time()
-        # 6. alerts
+        # 6. alerts (+ the paper ledger: entries at the next block, marks and exits every block)
         fired, outcomes = self._alerts(clock, block.number, wb)
+        paper_events: list[dict[str, Any]] = []
+        if self.paper is not None:
+            try:
+                for a in fired:
+                    if a["rule"] == "edge_enter":
+                        la = self.launches.get(a["token"]) or {}
+                        row = self.rows.get(a["token"]) or {}
+                        li = row.get("launch") or {}
+                        ev = self.paper.on_enter(a["token"], a["symbol"], la.get("curve"), row.get("verdict") or {}, self.paper.features.get(a["token"]), clock, block.number, tax_hint=li.get("creator_tax_bps"))
+                        if ev:
+                            paper_events.append(ev)
+                paper_events.extend(self.paper.on_block(clock, block.number, self.reserves, self.rows, self.launches, self.graduations, self.price_now, lambda t: self.label(t)["symbol"], wb, is_fragment=block.is_fragment))
+            except Exception as e:  # noqa: BLE001 - a ledger bug must not take the engine down
+                self.stats["paper_errors"] += 1
+                self.note_samples["paper_error"].append((block.number, f"{type(e).__name__}: {str(e)[:120]}"))
         # 7. events
         lat = {
             "head_to_logs": round((block.t_logs_complete - block.t_head_received) * 1000, 1) if block.t_head_received else None,
@@ -477,6 +525,7 @@ class EngineState:
             events.append(("radar_delta", {"full": False, "reason": "tick" if tick else "block", "clock": clock, "window_s": self.window_s, "span_s": self.span_s, "rows": sorted(changed, key=lambda r: -r["score"]), "removed": removed, "top": [r["address"] for r in self.ranked[:50]]}))
         events.extend(("alert", a) for a in fired + outcomes)
         events.extend(("verdict", v) for v in verdict_changes)
+        events.extend(("position", p) for p in paper_events)
         if not block.is_fragment:
             wb.meta["engine_cursor"] = block.number
         self.stats["blocks"] += 1
@@ -776,6 +825,7 @@ class EngineState:
             self.alert_pending.append(PendingAlert(tok, clock, r.get("price_quote"), r["symbol"]))
             fired.append({"kind": "fired", "key": f"{tok}:{clock}", "created_ts": created, "clock_ts": clock, "mode": "live", "token": tok, "symbol": r["symbol"], "rule": "under_radar_top5", "score": r["score"], "inflow": r["inflow_10m"], "mentions_1h": m1h, "price": r.get("price_quote"), "detail": detail})
             self.stats["alerts_fired"] += 1
+        fired.extend(self._edge_alerts(clock, block, wb))
         outcomes: list[dict[str, Any]] = []
         keep: list[PendingAlert] = []
         for p in self.alert_pending:
@@ -801,6 +851,44 @@ class EngineState:
         self.alert_pending = keep
         return fired, outcomes
 
+    def _edge_alerts(self, clock: int, block: int, wb: WriteBatch) -> list[dict[str, Any]]:
+        """Stage-4 rule `edge_enter` on the engine path (same parameters as the context worker's SQL rule): rows whose
+        verdict is ENTER, ranked by p, at most `per_hour` per clock hour, one per coin per 30 min; journaled with the
+        p / size / plan so the outcome loop settles +30 / +60 like every other alert."""
+        rule = self.rules.get("edge_enter")
+        if not rule:
+            return []
+        enter = sorted((r for r in self.ranked if (r.get("verdict") or {}).get("action") == "ENTER"), key=lambda r: -((r["verdict"].get("p_2x_30m") or 0)))  # ranked = >= 2 rotating wallets, like the worker's radar rows
+        if not enter:
+            return []
+        dedupe = int(rule.get("dedupe_s", 1800))
+        while self.edge_times and self.edge_times[0] <= clock - 3600:
+            self.edge_times.popleft()
+        out: list[dict[str, Any]] = []
+        for rank, r in enumerate(enter, 1):
+            if len(self.edge_times) >= int(rule.get("per_hour", 5)):
+                break
+            tok = r["address"]
+            last = self.edge_recent.get(tok)
+            if last is not None and last > clock - dedupe:
+                continue
+            v = r["verdict"]
+            self.edge_recent[tok] = clock
+            self.edge_times.append(clock)
+            sz = v.get("size") or {}
+            detail = {
+                "rank": rank, "p_2x_30m": v.get("p_2x_30m"), "p_minus50_30m": v.get("p_minus50_30m"), "ev_per_trade_quote": v.get("ev_per_trade_quote"), "size_quote": sz.get("quote"),
+                "exit_plan": (v.get("exit_plan") or {}).get("text"), "source": v.get("source"), "sources": r["sources"], "accel": r["accel"], "breadth": r["breadth"], "age_s": r["age_s"], "stage": r["stage"],
+                "engine": "wss", "block": block, "progress": r.get("progress"), "radar_rank": r.get("rank"), "reasons": (v.get("reasons") or [])[:4],
+            }
+            created = int(time.time())
+            wb.alerts.append((created, clock, "live", tok, r["symbol"], "edge_enter", r["score"], r["inflow_10m"], r.get("mentions_1h"), r.get("price_quote"), json.dumps(detail)))
+            self.alert_pending.append(PendingAlert(tok, clock, r.get("price_quote"), r["symbol"]))
+            out.append({"kind": "fired", "key": f"{tok}:{clock}", "created_ts": created, "clock_ts": clock, "mode": "live", "token": tok, "symbol": r["symbol"], "rule": "edge_enter", "score": r["score"], "inflow": r["inflow_10m"], "mentions_1h": r.get("mentions_1h"), "price": r.get("price_quote"), "detail": detail})
+            self.stats["alerts_fired"] += 1
+            self.stats["edge_alerts_fired"] += 1
+        return out
+
     # ---- events ----
     def _trade_event(self, tid: int, t: Trade, ts: int) -> dict[str, Any]:
         dec = self.qdec.get(t.quote_token or "", 18)
@@ -817,5 +905,6 @@ class EngineState:
             "curves": len(self.ctx.curves), "pools": len(self.ctx.pool_token), "launches": len(self.launches), "reserves": len(self.reserves),
             "wallets_tracked": len(self.wallet_ring), "coins_tracked": len(self.coin_trades), "radar_rows": len(self.rows), "ranked": len(self.ranked),
             "alerts_pending": len(self.alert_pending), "unresolved_curves": len(self.unresolved_curves), "tokens_needing_meta": len(self.tokens_needing_meta),
+            "paper": self.paper.summary() if self.paper is not None else None,
             "notes": dict(self.notes), "note_samples": {k: list(v)[-5:] for k, v in list(self.note_samples.items())}, "clock": self.clock, "next_trade_id": self.next_trade_id,
         }

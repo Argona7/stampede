@@ -17,13 +17,17 @@ def short(a: str) -> str:
 
 def sample(store: Store) -> dict[str, Any]:
     fr, to = store.get_meta("sample_from_block"), store.get_meta("sample_to_block")
-    b = store.blocks()
+    # only the two anchor blocks: the live engine adds ~36k rows per hour to `blocks`, so loading the table here made
+    # /api/status slow down over a multi-day run (docs/ENGINE-PERF.md, open issue 2)
+    b: dict[int, int] = {}
+    if fr is not None or to is not None:
+        b = {n: ts for n, ts in store.db.execute("SELECT number, timestamp FROM blocks WHERE number IN (?, ?)", (fr if fr is not None else -1, to if to is not None else -1))}
     return {
         "label": store.get_meta("sample_label", "sample"),
         "from_block": fr,
         "to_block": to,
-        "from_ts": b.get(fr, (None, 0))[0] if fr else None,
-        "to_ts": b.get(to, (None, 0))[0] if to else None,
+        "from_ts": b.get(fr) if fr else None,
+        "to_ts": b.get(to) if to else None,
     }
 
 

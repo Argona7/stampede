@@ -57,6 +57,9 @@ class XMentions:
         try:
             r = self.s.get(BASE + path, params=params, timeout=self.timeout)
             bump(self.store, "twitterapi")
+            # commit right away: the budget row must not hold the SQLite write lock across the next page's HTTP call (the
+            # engine's writer waited up to 46 s behind it in docs/ENGINE-PERF.md)
+            self.store.commit()
             if r.status_code != 200:
                 return None
             return r.json()

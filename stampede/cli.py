@@ -112,6 +112,14 @@ def main(argv: list[str] | None = None) -> int:
 
     _edge_parser(sub.add_parser("edge", help="walk-forward runner model, alert precision/lift/lead, exit-policy search with exact curve fills -> docs/RESEARCH-EDGE.md + stampede/signals/edge-config.json + data/models/edge-<date>.pkl (needs the research extra: uv sync --extra research)"))
 
+    p = sub.add_parser("track-record", help="honest report of a live paper run (alerts + outcomes, simulated paper stats with CI, uptime/gaps from /api/perf) -> docs/TRACK-RECORD.md")
+    p.add_argument("--db", default=None, help="the live engine's store (default: STAMPEDE_DB / data/stampede.sqlite)")
+    p.add_argument("--out", default="docs/TRACK-RECORD.md", help="markdown path; '' prints to stdout")
+    p.add_argument("--api", default=None, help="base URL of the running engine, e.g. http://127.0.0.1:8812, for the /api/perf snapshot (saved next to --out as <name>-perf.json)")
+    p.add_argument("--perf-json", default=None, help="a saved /api/perf snapshot to use instead of --api")
+    p.add_argument("--since", type=int, default=None, help="count alerts and positions from this unix time (default: the latest engine start recorded in the store)")
+    p.add_argument("--mode", default="live", help="alert journal mode to report (default live)")
+
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8791)
@@ -163,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
         from .demo import main_demo
 
         return main_demo(args)
+    if args.cmd == "track-record":
+        from .track_record import main_track_record
+
+        return main_track_record(args)
     if args.cmd == "fx":
         from .context.fx import main_fx
 
