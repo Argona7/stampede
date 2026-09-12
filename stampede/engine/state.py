@@ -433,6 +433,7 @@ class EngineState:
             removed = self._expire(clock)
             touched |= set(self.rows)
         changed: list[dict[str, Any]] = []
+        need_verdict: list[dict[str, Any]] = []
         for tok in touched:
             dq = self.coin_seqs.get(tok)
             if not dq:
@@ -442,11 +443,17 @@ class EngineState:
             self.rows[tok] = row
             if old is None or not tick or (old["score"], old["inflow_10m"], old["price_quote"], old["progress"]) != (row["score"], row["inflow_10m"], row["price_quote"], row["progress"]):
                 changed.append(row)
+                need_verdict.append(row)
+            elif old.get("verdict") is not None:
+                row["verdict"] = old["verdict"]  # a tick that changed nothing visible keeps the last verdict
+                row.pop("_vf", None)
+            else:
+                need_verdict.append(row)
         self.ranked = sorted((r for r in self.rows.values() if r["wallets_range"] >= 2), key=lambda r: -r["score"])
         rank_of = {r["address"]: i for i, r in enumerate(self.ranked, 1)}
         for r in self.rows.values():
             r["rank"] = rank_of.get(r["address"])
-        verdict_changes = self._attach_verdicts(changed, block.number, clock)
+        verdict_changes = self._attach_verdicts(need_verdict, block.number, clock)
         t_radar = time.time()
         # 6. alerts
         fired, outcomes = self._alerts(clock, block.number, wb)
