@@ -212,7 +212,14 @@ def deployer_pass(store: Store, clock: BlockClock, lo: int | None, hi: int | Non
 
     dep: str | None = None
     group: list[tuple[int, str, int | None, str | None, str | None]] = []
-    for token, deployer, block, ts0, tx, pair in q("SELECT token, deployer, block, ts, tx_hash, pair_token FROM launches WHERE block IS NOT NULL ORDER BY deployer, block, token"):
+    # Read the launches through a separate read-only connection: iterating a cursor on the writing connection while
+    # flush() inserts fails with SQLITE_BUSY_SNAPSHOT as soon as another process (the live engine) commits in between.
+    import sqlite3 as _sqlite3
+
+    reader = _sqlite3.connect(f"file:{store.path}?mode=ro", uri=True) if str(store.path) != ":memory:" else None
+    sel = "SELECT token, deployer, block, ts, tx_hash, pair_token FROM launches WHERE block IS NOT NULL ORDER BY deployer, block, token"
+    launches_iter = reader.execute(sel) if reader is not None else store.db.execute(sel).fetchall()
+    for token, deployer, block, ts0, tx, pair in launches_iter:
         if deployer != dep and group:
             emit(group)
             group = []
@@ -222,6 +229,8 @@ def deployer_pass(store: Store, clock: BlockClock, lo: int | None, hi: int | Non
         emit(group)
     flush()
     store.commit()
+    if reader is not None:
+        reader.close()
     return {"launches": n, "observed": obs, "history_window_blocks": W}
 
 

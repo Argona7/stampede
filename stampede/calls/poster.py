@@ -201,14 +201,18 @@ class LaunchFacts:
         self.api = api.rstrip("/") if api else None
         self.s = session or requests.Session()
         self.timeout = timeout
-        self.cache: dict[str, dict[str, Any] | None] = {}
+        self.cache: dict[str, tuple[dict[str, Any] | None, float]] = {}
+        self.miss_ttl_s = 120.0
         self.requests = 0
 
     def for_token(self, token: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
         if payload:  # a `launch` object inside the alert / radar row wins (future engines may carry it)
             return {k: payload.get(k) for k in LAUNCH_FIELDS}
         if token in self.cache:
-            return self.cache[token]
+            entry = self.cache[token]
+            hit, at = entry if isinstance(entry, tuple) else (entry, time.time())  # tests and older callers store the dict itself
+            if hit is not None or time.time() - at < self.miss_ttl_s:
+                return hit
         li: dict[str, Any] | None = None
         if self.store is not None:
             try:
@@ -229,7 +233,7 @@ class LaunchFacts:
                     li = {k: intel.get(k) for k in LAUNCH_FIELDS} if intel else None
             except (requests.RequestException, ValueError) as e:
                 log.info("launch facts for %s: %s", token[-6:], type(e).__name__)
-        self.cache[token] = li
+        self.cache[token] = (li, time.time())  # a miss is retried after miss_ttl_s: launch facts arrive minutes after the launch
         return li
 
 
