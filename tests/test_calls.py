@@ -15,8 +15,8 @@ TOKEN = "0x3bd73a113b6543402e30a6fb48b79cb006d039ac"
 PLAN = ["size 0.0150 ETH (cap_per_trade)", "sell 50% at +100%", "then trail 25% below the high", "stop at −30%", "out after 45 min whatever the price", "exit now on: sell pressure spike, deployer / exempt wallet selling, liquidity drop, graduation, rotation inflow stops for 5 min"]
 
 
-def alert(clock: int = 1789283299, token: str = TOKEN, symbol: str = "STACK·39ac", p: float = 0.41, size: float = 0.015, **detail: Any) -> dict[str, Any]:
-    d = {"rank": 1, "p_2x_30m": p, "p_minus50_30m": 0.22, "ev_per_trade_quote": 0.0024, "size_quote": size, "exit_plan": PLAN, "source": "model", "age_s": 300, "stage": "curve", "engine": "wss", "block": 61344094, "progress": 0.1234, "radar_rank": 3}
+def alert(clock: int = 1789283299, token: str = TOKEN, symbol: str = "STACK·39ac", p: float = 0.51, size: float = 0.015, **detail: Any) -> dict[str, Any]:
+    d = {"rank": 1, "p_2x_30m": p, "p_minus50_30m": 0.22, "ev_per_trade_quote": 0.0024, "size_quote": size, "exit_plan": PLAN, "source": "model", "age_s": 300, "breadth": 4, "stage": "curve", "engine": "wss", "block": 61344094, "progress": 0.1234, "radar_rank": 3}
     d.update(detail)
     return {"kind": "fired", "key": f"{token}:{clock}", "created_ts": clock, "clock_ts": clock, "mode": "live", "token": token, "symbol": symbol, "rule": "edge_enter", "score": 78.6, "inflow": 22, "mentions_1h": 0, "price": 3.8e-9, "detail": d}
 
@@ -121,7 +121,7 @@ EXPECTED_CALL = "\n".join(
     [
         "<b>ENTER STACK·39ac</b>",
         f"<code>{TOKEN}</code>",
-        "p(2× 30m) 41 %  ·  EV +0.0024 ETH / 0.02 ETH  ·  size 0.015 ETH",
+        "p(2× 30m) 51 %  ·  EV +0.0024 ETH / 0.02 ETH  ·  size 0.015 ETH",
         "inflow 22 wallets/10 min · age 5 min · curve 12 %",
         "launch: dev 2.1 % · bundle 1 · tax 25 bps",
         "exit: TP +100 % × 50 % · trail 25 % · stop −30 % · 45 min",
@@ -193,8 +193,8 @@ def test_rule_filters(tmp_path):
     assert rule.check(alert(size=0), None, store) == "size 0"
     assert rule.check(alert(size=None), None, store) == "size 0"
     assert rule.check(alert(), {"launch_farm": True}, store) == "launch farm"
-    assert rule.check(alert(), {"bundle_n": 5}, store) == "bundle 5 > 4"
-    assert rule.check(alert(), {"bundle_n": 4, "dev_buy_share": 0.10}, store) is None
+    assert rule.check(alert(), {"bundle_n": 5}, store) == "bundle 5 > 2"
+    assert rule.check(alert(), {"bundle_n": 2, "dev_buy_share": 0.10}, store) is None
     assert rule.check(alert(), {"dev_buy_share": 0.11}, store).startswith("dev buy 11.0%")
     assert rule.check(alert(), {"launch_farm": None, "bundle_n": None, "dev_buy_share": None}, store) is None  # unknown never skips
 
@@ -204,15 +204,13 @@ def test_dedupe_and_per_hour(tmp_path):
     assert poster.handle_fired(alert(clock=1000), ts_emit=999.5) == "posted"
     assert poster.handle_fired(alert(clock=1000), ts_emit=999.5) == "duplicate"  # same key
     assert poster.handle_fired(alert(clock=1500), ts_emit=1499.5) == "skipped: same coin within 30 min"
-    assert poster.handle_fired(alert(clock=2900), ts_emit=2899.5) == "posted"  # 1900 s later: allowed
-    for i in range(3):
-        assert poster.handle_fired(alert(clock=3000 + i, token=f"0x{i:040x}", symbol=f"T{i}"), ts_emit=3000.0) == "posted"
-    assert poster.handle_fired(alert(clock=3100, token="0x" + "f" * 40, symbol="LATE"), ts_emit=3100.0) == "skipped: 5 calls in the hour"
+    assert poster.handle_fired(alert(clock=2900), ts_emit=2899.5) == "posted"  # 1900 s later: allowed (2 calls in the hour now)
+    assert poster.handle_fired(alert(clock=3100, token="0x" + "f" * 40, symbol="LATE"), ts_emit=3100.0) == "skipped: 2 calls in the hour"
     assert poster.handle_fired(alert(clock=1000 + 3601, token="0x" + "e" * 40, symbol="NEXT"), ts_emit=4601.0) == "posted"  # the first call left the hour
     assert poster.handle_fired({**alert(clock=5000), "rule": "under_radar_top5"}, ts_emit=5000.0) == "ignored" and poster.store.get(f"{TOKEN}:5000") is None
-    assert len(tgs.sent()) == 6
+    assert len(tgs.sent()) == 3
     assert poster.store.get(f"{TOKEN}:1500")["skipped"] == "same coin within 30 min"
-    assert poster.store.stats(0)["posted"] == 6 and poster.store.stats(0)["skipped"] == 2
+    assert poster.store.stats(0)["posted"] == 3 and poster.store.stats(0)["skipped"] == 2
 
 
 # ---------------------------------------------------------------- outcomes
@@ -409,3 +407,15 @@ def test_launch_facts_from_store_table(tmp_path):
     assert lf.for_token("0x" + "9" * 40) is None and lf.requests == 0  # no API fallback while a store is present
     assert lf.for_token(TOKEN, {"launch_farm": True, "bundle_n": 9})["bundle_n"] == 9  # payload wins
     assert fmt.launch_line(li) == "launch: dev 2.1 % · bundle 1 · tax 25 bps"
+
+
+def test_flow_shape_negatives_skip_thin_breadth_and_fresh_launches():
+    from stampede.calls.poster import Rule
+
+    r = Rule({"rule": "edge_enter", "min_p": 0.3, "max_per_hour": 5, "dedupe_s": 1800, "skip_if": {"breadth_lt": 2, "age_s_lt": 180}, "require_size_gt_0": False})
+    base = {"rule": "edge_enter", "token": "0x" + "1" * 40, "clock_ts": 1000, "detail": {"p_2x_30m": 0.5, "breadth": 1, "age_s": 400}}
+    assert r.check(base, None, None) == "breadth 1 < 2"
+    base["detail"].update(breadth=5, age_s=90)
+    assert r.check(base, None, None) == "age 90s < 180s"
+    base["detail"].update(age_s=400)
+    assert r.check(base, None, None) is None

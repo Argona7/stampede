@@ -254,6 +254,13 @@ class Rule:
         if c.get("require_size_gt_0") and not ((d.get("size_quote") or 0) > 0):
             return "size 0"
         sk = c.get("skip_if") or {}
+        # flow-shape filters from the alert detail (live-calibrated negatives, see calls-config.json "note")
+        if sk.get("breadth_lt") is not None and d.get("breadth") is not None and int(d["breadth"]) < int(sk["breadth_lt"]):
+            return f"breadth {d['breadth']} < {sk['breadth_lt']}"
+        if sk.get("age_s_lt") is not None and d.get("age_s") is not None and float(d["age_s"]) < float(sk["age_s_lt"]):
+            return f"age {int(float(d['age_s']))}s < {sk['age_s_lt']}s"
+        if sk.get("age_s_gt") is not None and d.get("age_s") is not None and float(d["age_s"]) > float(sk["age_s_gt"]):
+            return f"age {int(float(d['age_s']))}s > {sk['age_s_gt']}s"
         if launch:
             if sk.get("launch_farm") and launch.get("launch_farm"):
                 return "launch farm"

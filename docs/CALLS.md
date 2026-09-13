@@ -191,3 +191,34 @@ expectancy −0.0016 ETH, 95 % CI [−0.0032, +0.0001] ETH (the numbers of the `
 - Screenshot of the public preview (`t.me/s/stampede_calls`, 08:5x UTC): `docs/assets/calls/channel-2026-09-13.png`.
 - Gates at commit `6bc52cb`: `uv run pytest -q` 157 passed; the poster does not touch the web app (web lint/build/e2e last run green at `ec79b6c`).
 - Known: calls before the periodic `launch-intel` job had `launch: n/a`; the mini now recomputes launch facts every 10 minutes and the poster retries a miss after 120 s.
+
+## Why these thresholds (live calibration, 2026-09-13)
+
+The first 24 hours of the live engine (laptop, 17:24 UTC 12 Sep → 08:50 UTC 13 Sep) settled 530 alerts with a
++30 min outcome (35 `edge_enter`, 495 `under_radar_top5`). The picture is blunt:
+
+| what | value |
+|---|---|
+| alerts whose price at +30 min is above the alert price | 15 % |
+| median price change at +30 min | −48 % |
+| alerts at ≥ 2× at +30 min | 6 % (the coin-minute base rate is 5–6 %) |
+| `edge_enter` alone (34 settled) | 37 % up, median −14 %, 6 % at ≥ 2× |
+| paper ledger, 26 closed simulated trades | 6 wins, −0.043 ETH total, exits: stop 11, inflow-dies 8, trail 2, time 1, triggers 4 |
+
+The model shipped from the 5-hour store does not carry its out-of-sample numbers into live trading yet (19 test alerts
+in 22-minute folds were not enough; the 14-day measurement is the fix and runs as soon as the backfill is READY).
+Until it lands, the channel posts fewer calls with the negatives that have strong evidence:
+
+| filter | evidence (n, +30 min) |
+|---|---|
+| `breadth < 2` source coins → skip | n=94: 3 % up, 0 % at +50 %, mean −46 % |
+| `age < 180 s` → skip | n=340: 11 % up, median −56 %, mean −28 % |
+| `bundle_n ≥ 3` or launch farm → skip | bundles 3+: n=122, ≤ 10 % up, mean −12…−45 %; farms n=112: 9 % up, mean −32 % |
+| `dev_buy_share > 10 %` → skip | n=155: 6 % up, mean −32 % |
+| `max 2 calls / hour`, `p ≥ 0.45` | volume cap while the live edge is unproven |
+
+Cells with a positive *mean* exist (age 180–600 s: mean +20 %; dev buy 0.5–2 %: +18 %; graduated-stage alerts: +17 %;
+breadth ≥ 8: 22 % up), but their medians are still negative — the mean is carried by a few runners. That is the memecoin
+shape: profit comes from catching the few and cutting the rest early, so the exit plan matters as much as the entry.
+`stampede/signals/calls-config.json` carries the numbers in its `note`; the next revision comes from
+`docs/CALLS-TUNING.md` (exit-policy simulation over every live alert with the full price path, not just the +30 min mark).

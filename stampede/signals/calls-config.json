@@ -1,16 +1,18 @@
 {
   "rule": "edge_enter",
-  "min_p": 0.30,
-  "max_per_hour": 5,
+  "min_p": 0.45,
+  "max_per_hour": 2,
   "dedupe_s": 1800,
   "skip_if": {
     "launch_farm": true,
-    "bundle_n_gt": 4,
-    "dev_buy_share_gt": 0.10
+    "bundle_n_gt": 2,
+    "dev_buy_share_gt": 0.1,
+    "breadth_lt": 2,
+    "age_s_lt": 180
   },
   "require_size_gt_0": true,
   "catchup_s": 1800,
   "summary_utc_hour": 9,
   "ev_basis_quote": 0.02,
-  "note": "min_p 0.30 is the p(2x in 30 min) threshold of the 8-alerts/hour row of docs/RESEARCH-EDGE.md (42.5 % >= 2x on test, lift 7.9x); the engine's own edge_enter rule already fires at p >= 0.455 (5/h row), so today min_p only matters if the engine threshold is lowered. skip_if fields come from launch_intel; unknown facts (launch: n/a) do not skip."
+  "note": "Live-calibrated 2026-09-13 on 530 alerts with +30 min outcomes from the first 24 h of the engine (docs/CALLS.md, 'Why these thresholds'): the +30 min price is below the alert price for 85 % of alerts and the >=2x-at-+30 rate equals the base rate, so the channel posts fewer, better-shaped calls until the 14-day model lands. Negatives with strong evidence: breadth < 2 source coins (n=94: 0 % up 50 %, mean -46 %), age < 180 s (n=340: median -56 %, mean -28 %), bundle >= 3 or launch farm (n=112: mean -32 %). max 2 calls/hour, p >= 0.45. Positive cells so far are means driven by a few runners (age 180-600 s mean +20 %, dev 0.5-2 % mean +18 %, graduated-stage alerts mean +17 %) and need more data before they become requirements."
 }
