@@ -391,6 +391,8 @@ class Poster:
     # ---- alerts
     def handle_fired(self, alert: dict[str, Any], ts_emit: float | None = None, source: str = "live") -> str:
         """One alert -> `posted` / `duplicate` / `skipped: <reason>`."""
+        if alert.get("rule") != self.cfg["rule"]:
+            return "ignored"  # the other rule's alerts (under_radar_top5, ~500/day) are not the channel's business: no row, no log line
         key = alert.get("key") or f"{alert['token']}:{int(alert.get('clock_ts') or 0)}"
         if self.store.get(key) is not None:
             return "duplicate"
