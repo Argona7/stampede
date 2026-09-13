@@ -11,7 +11,7 @@ longer stop the paper run or the channel.
 | account | `argona` (uid 501, the auto-login console user; reach it with `ssh argona@100.122.123.37` over Tailscale). The laptop's `mac-mini` ssh alias lands on the `agent` account, which has no GUI session and no sudo, so `launchctl bootstrap gui/…` fails there ("Domain does not support specified action"); the API on `127.0.0.1:8821` is reachable from both accounts. |
 | checkout | `~/dev/stampede` (clone of github.com/Argona7/stampede, `main`), `.venv` from `uv sync`, Python 3.13 via `uv` (`~/.local/bin/uv`) |
 | secrets | `~/dev/stampede/.env` (mode 600, copied from the laptop with `scp`; `ALCHEMY_KEY`, `HYPERSYNC_TOKEN`, `TWITTERAPI_KEY`, `TELEGRAM_*`) |
-| store | `~/dev/stampede/data/live-engine.sqlite` (grows ~1 GB/day; the mini has ~40 GB free - never copy the research stores there) |
+| store | `~/dev/stampede/data/live-engine.sqlite` (the mini has ~39 GB free - never copy the research stores there). With raw logs persisted it grew ~12 MB/min (~13 GB/day, `logs` 139 MB after 18 min), so the engine plist sets `STAMPEDE_ENGINE_LOGS=0` (docs/ENGINE.md: raw logs of trade transactions are not written; trades, sequences, blocks, alerts, paper ledger are). Measure with the health commands below. |
 | seed | `~/dev/stampede/data/seed-registry.sqlite` (252 MB, registry only) |
 | agents | `~/Library/LaunchAgents/com.stampede.engine.plist`, `~/Library/LaunchAgents/com.stampede.calls.plist` |
 | logs | `~/dev/stampede/data/launchd-engine.log`, `~/dev/stampede/data/launchd-calls.log` (stdout + stderr, append) |
@@ -19,7 +19,7 @@ longer stop the paper run or the channel.
 Both agents: `RunAtLoad`, `KeepAlive` with `SuccessfulExit=false` (relaunch after a crash or `kickstart -k`, stay down
 after a clean exit), `ThrottleInterval 15`, `ExitTimeOut 10` (SIGTERM, then SIGKILL - two engines on one store would
 both assign trade ids, docs/ENGINE.md), `WorkingDirectory ~/dev/stampede`, `PATH` with `~/.local/bin` and
-`/opt/homebrew/bin`, `PYTHONUNBUFFERED=1`. The engine runs without `--notify` (no banners on a headless machine) and
+`/opt/homebrew/bin`, `PYTHONUNBUFFERED=1`, the engine additionally `STAMPEDE_ENGINE_LOGS=0`. The engine runs without `--notify` (no banners on a headless machine) and
 with `--host 0.0.0.0`, so the web terminal answers on the Tailscale address (http://100.122.123.37:8821/, tailnet
 only - the mini is not exposed beyond it and the home LAN); the poster talks to `127.0.0.1:8821`. `__HOME__` in the
 plists is replaced by the remote `$HOME` at install time (launchd does not expand `~`).
@@ -144,6 +144,9 @@ Engine on the mini (`argona@100.122.123.37`, macOS 26.3, 10 cores / 16 GB, 40 GB
   an engine restart it backed off 1 -> 15 s and reconnected with `resume from <last id>`.
 - Web terminal built on the mini (`npm ci` 5 s, `npm run build` 3 s, `dist/` 1.5 MB), `/?view=signals` -> 200 over
   Tailscale.
+- Store growth with raw logs on: 252 MB (seed) -> 397 MB at +10 min -> 486 MB at +18 min; the `logs` table and its
+  index were 165 of the 234 MB written. Restarted with `STAMPEDE_ENGINE_LOGS=0` at 08:24 UTC (the writer's `by_table`
+  no longer lists `logs`).
 
 ## Open issue: the poster's resume across an engine restart
 

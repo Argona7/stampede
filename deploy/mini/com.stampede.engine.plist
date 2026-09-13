@@ -37,6 +37,10 @@
         <string>1</string>
         <key>OMP_WAIT_POLICY</key>
         <string>PASSIVE</string>
+        <!-- raw logs of trade transactions are not persisted on the mini: measured 2026-09-13, the `logs` table grew
+             ~9 MB/min (~13 GB/day) against ~39 GB free; trades, sequences, alerts and the paper ledger are unaffected -->
+        <key>STAMPEDE_ENGINE_LOGS</key>
+        <string>0</string>
     </dict>
 
     <key>RunAtLoad</key>
