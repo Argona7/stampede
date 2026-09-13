@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Install (or reinstall) the STAMPEDE launchd agents on the Mac mini from this laptop.
 #
-#   deploy/mini/install.sh                # engine only (com.stampede.engine)
-#   deploy/mini/install.sh --with-calls   # engine + Telegram poster (com.stampede.calls)
-#   deploy/mini/install.sh --calls-only   # (re)install only the poster; the engine keeps running
+#   deploy/mini/install.sh                       # engine + launch-intel timer (com.stampede.engine, com.stampede.launch-intel)
+#   deploy/mini/install.sh --with-calls          # ... + Telegram poster (com.stampede.calls)
+#   deploy/mini/install.sh --only calls          # (re)install one agent; repeatable (engine | calls | launch-intel)
+#   deploy/mini/install.sh --calls-only          # = --only calls
 #   MINI_HOST=user@host deploy/mini/install.sh
 #
 # The target must be the mini's *console* account (auto-login user `argona`, uid 501, over Tailscale): a
@@ -17,14 +18,21 @@
 set -euo pipefail
 
 HOST="${MINI_HOST:-argona@100.122.123.37}"
-SERVICES=(engine)
-for a in "$@"; do
-    case "$a" in
-        --with-calls) SERVICES=(engine calls) ;;
-        --calls-only) SERVICES=(calls) ;;
-        -h|--help) sed -n '2,7p' "$0"; exit 0 ;;
-        *) echo "unknown argument: $a" >&2; exit 2 ;;
+SERVICES=(engine launch-intel)
+ONLY=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --with-calls) SERVICES=(engine launch-intel calls) ;;
+        --calls-only) ONLY+=(calls) ;;
+        --only) shift; ONLY+=("$1") ;;
+        -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
+    shift
+done
+[ ${#ONLY[@]} -gt 0 ] && SERVICES=("${ONLY[@]}")
+for s in "${SERVICES[@]}"; do
+    case "$s" in engine|calls|launch-intel) ;; *) echo "unknown agent: $s (engine | calls | launch-intel)" >&2; exit 2 ;; esac
 done
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

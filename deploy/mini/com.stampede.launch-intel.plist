@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- launch facts for the calls poster: refresh `launch_intel` of the live store every 10 minutes
+         (docs/DEPLOY-MINI.md). __HOME__ is replaced by deploy/mini/install.sh. Runs deploy/mini/launch_intel_job.py
+         instead of `stampede launch-intel` because the CLI hits `database is locked` against the live store. -->
+    <key>Label</key>
+    <string>com.stampede.launch-intel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/dev/stampede/.venv/bin/python</string>
+        <string>deploy/mini/launch_intel_job.py</string>
+        <string>--db</string>
+        <string>data/live-engine.sqlite</string>
+        <string>--horizon</string>
+        <string>3600</string>
+        <string>--hours</string>
+        <string>24</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/dev/stampede</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <!-- once at login, then every 600 s; no KeepAlive: a failed run is retried at the next interval -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>600</integer>
+
+    <!-- no ProcessType Background: its I/O throttling made the run 8x slower and the write lock on the live store
+         was held 4 s instead of a fraction of a second (measured 2026-09-13) -->
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-launch-intel.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-launch-intel.log</string>
+</dict>
+</plist>
