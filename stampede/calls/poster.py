@@ -575,7 +575,7 @@ def build(args: Any) -> Poster:
             raise SystemExit("TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL missing in .env (use --dry-run to print instead)")
         tg = Telegram(token, chat)
     launch = LaunchFacts(store, args.api)
-    perf = Perf(args.perf_json)
+    perf = Perf(args.perf_json or DEFAULT_PERF)
     return Poster(args.api, cfg, store, tg, launch, perf, dry_run=args.dry_run, channel_username=env("TELEGRAM_CHANNEL_USERNAME"))
 
 
