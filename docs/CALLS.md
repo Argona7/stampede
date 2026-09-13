@@ -4,7 +4,8 @@
 replies under each call with the measured +30 / +60 min outcome and the paper exit, and posts one summary a day. It is a
 client of the engine (docs/ENGINE.md): one process that reads `GET /api/stream`, applies the rule of
 `stampede/signals/calls-config.json` and talks to the Bot API. Code: `stampede/calls/` (`poster.py`, `format.py`);
-tests: `tests/test_calls.py`.
+tests: `tests/test_calls.py`. **The production instance runs on the Mac mini** (launchd, next to its engine); the
+laptop is for development and runs it with `--dry-run` only (see "Where it runs").
 
 ## What a call is
 
@@ -123,12 +124,21 @@ uv run stampede calls --api http://127.0.0.1:8821 --summary            # post it
 ```
 
 Options: `--config` (rule JSON), `--db` (the live store), `--perf-json` (latency file). Restart: `pkill -f "stampede.cli
-calls"`, start again; the catch-up and the `calls` table make it idempotent. **Exactly one poster per channel**: two
-posters on two stores (laptop and Mac mini) would each post their own engine's alerts. When the Mac mini deployment
-takes over, stop the laptop instance first (`pkill -f "stampede.cli calls"` on the laptop), then start the Mac mini one;
-the Mac mini engine's store starts with an empty `calls` table, so its catch-up posts the alerts of the last 30 min
-that its engine fired - if the laptop poster already posted some of them the channel shows those coins twice, once
-per engine. Starting the Mac mini poster with `catchup_s: 0` in its config for the first start avoids that.
+calls"`, start again; the catch-up and the `calls` table make it idempotent.
+
+**Where it runs.** The authoritative poster is the one on the Mac mini, under launchd next to the engine it reads
+(deployment recipe: `deploy/`). **Exactly one poster per channel**: two posters on two engines would each post their
+own engine's alerts, and the same coin would appear twice in the public channel. The laptop is a development machine:
+run the poster there only with `--dry-run` (prints instead of posting, writes nothing to the store); `--once` for a
+format check is allowed if the message is deleted right away with `--delete <id>`. The laptop poster of the first run
+(below) was stopped on 2026-09-13 at 08:30 UTC when the Mac mini instance took over.
+
+Engine restarts: every engine process numbers its events from 1. The poster detects a restart on the hello (the
+server's `last_event_id` is behind its own cursor, or `started_at` changed, or `replay_gap: true`), drops its
+`Last-Event-ID`, re-reads the alert journal (catch-up) and reconnects without an id; the server, for its part, treats a
+stale id as a gap and streams from its current position (before this fix it silently dropped every event with an id
+below the stale one, for hours after a day-long run). Log line: `resync (<reason>): dropping Last-Event-ID N, re-reading
+the journal`.
 
 Log lines (`data/calls.log`, UTC): `call <symbol> <clock> -> <link> post <ms> latency <ms> p50 <ms> p95 <ms>`,
 `skip <symbol> <clock>: <reason>`, `outcome +30/+60 …`, `exit …`, `catch-up: {...}`, `stream connected (resume from N)`,
@@ -142,7 +152,25 @@ the first call taken from the stream was [/8](https://t.me/stampede_calls/8) at 
 **167 ms** from the engine's `ts_emit` to the Bot API acknowledgement (the `sendMessage` round trip itself 166 ms). The
 format check before the run (`--once`) went to message /5 and was deleted with `--delete 5`.
 
-RUN_NUMBERS_PLACEHOLDER
+Run (laptop, 07:58 - 08:30 UTC, then handed over to the Mac mini): 5 calls posted, 3 of them from the stream, 2 from
+the start-up catch-up; 4 paper exits and 2 `+30 min` outcomes replied under their calls; 0 skipped by the rule; 2
+restarts of the poster (code fixes) with `duplicate: 3` catch-ups and no double post.
+
+| call | message | source | `ts_emit` → Bot API ack |
+|---|---|---|---|
+| 赢·3452, 07:57:15 UTC | [/6](https://t.me/stampede_calls/6) | catch-up | - (fired before the poster started) |
+| 香蕉猫·1dd3, 07:57:57 UTC | [/7](https://t.me/stampede_calls/7) | catch-up | - |
+| PayOff·b382, 08:00:50 UTC | [/8](https://t.me/stampede_calls/8) | stream | 167 ms |
+| DEPLOY·d903, 08:25:03 UTC | [/11](https://t.me/stampede_calls/11) | stream | 152 ms |
+| mist·fc0f, 08:25:04 UTC | [/12](https://t.me/stampede_calls/12) | stream | 140 ms |
+
+Post latency of the stream calls: p50 152 ms, p95 167 ms, max 167 ms (n = 3; the `sendMessage` round trip is 140-166
+ms of it, the rest is the SSE hop on localhost). Target p95 ≤ 2 s. Replies: exits [/9](https://t.me/stampede_calls/9)
+(stop, −0.0017 ETH), [/10](https://t.me/stampede_calls/10) (inflow dies, +0.0015 ETH), [/13](https://t.me/stampede_calls/13),
+[/14](https://t.me/stampede_calls/14); outcomes [/15](https://t.me/stampede_calls/15), [/16](https://t.me/stampede_calls/16)
+(+30 min of the two catch-up calls). The engine behind it: 31 `edge_enter` alerts in the journal at 07:57 UTC (the
+store since 2026-09-12 16:05 UTC), 2 of 27 settled ≥ 2× at +30 min, median +30 min −5.8 %; paper 21 trades, hit 24 %,
+expectancy −0.0016 ETH, 95 % CI [−0.0032, +0.0001] ETH (the numbers of the `--dry-run --summary` at 07:57 UTC).
 
 ## Known limits
 

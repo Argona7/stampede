@@ -129,7 +129,10 @@ data: {"id":1234,"type":"trade","ts_emit":1789208380.123,"block":61033700,"data"
 - Reconnect with the `Last-Event-ID` header (browsers do it themselves) or `?last_event_id=N`: every event with a
   larger id still in the ring (last 5,000 events, ~90 s at the measured 55 events/s) is replayed before live events.
   If the ring no longer reaches back that far, the hello carries `replay_gap: true` and the client should refetch
-  `/api/radar` (and `/api/alerts`) before consuming deltas.
+  `/api/radar` (and `/api/alerts`) before consuming deltas. An id **larger** than the server's counter (the client
+  survived an engine restart; every process counts from 1) is the same gap: `replay_gap: true`, and the stream
+  continues from the current position. The hello carries `started_at` of the server process so a client can tell a
+  restart apart from a slow counter (the calls poster does: docs/CALLS.md).
 - The first frame of every connection is a `session` hello **without an `id:` line** (it does not move the client's
   Last-Event-ID); `data.hello = true`, `data.last_event_id` is the current counter, `data.replay_from` what was asked.
 - `?types=a,b` filters server-side (replay and live). `?limit=N` closes after N events (scripts, tests). A comment line
