@@ -182,3 +182,12 @@ expectancy −0.0016 ETH, 95 % CI [−0.0032, +0.0001] ETH (the numbers of the `
   engine's `alerts` table), so the poster's own dedupe rarely binds.
 - One `sendMessage` per call, one per outcome reply: ~3-4 messages per call; Telegram's channel limit (~20/min) is far
   away at 5 calls per hour.
+
+## Verification record (2026-09-13)
+
+- Channel: https://t.me/stampede_calls (public), created 07:50 UTC from the owner's account with `scripts/tg_setup.py`: title, brand avatar, description, pinned welcome (message 3); bot `@stampede_calls_bot` is admin.
+- First run against the laptop engine (07:58–08:30 UTC): 5 real calls — [/6](https://t.me/stampede_calls/6), [/7](https://t.me/stampede_calls/7) (catch-up), [/8](https://t.me/stampede_calls/8) (first from the stream, 167 ms from `ts_emit` to the Telegram ack), [/11](https://t.me/stampede_calls/11) (152 ms), [/12](https://t.me/stampede_calls/12) (140 ms); exits replied under the calls ([/9](https://t.me/stampede_calls/9), [/10](https://t.me/stampede_calls/10), [/13](https://t.me/stampede_calls/13), [/14](https://t.me/stampede_calls/14)); +30 min outcomes [/15](https://t.me/stampede_calls/15) (+26 %) and [/16](https://t.me/stampede_calls/16) (−14 %). Post latency p50 152 ms / p95 167 ms (target ≤ 2 s). Test message /5 deleted with `--delete`.
+- Since 08:38 UTC the authoritative poster runs on the Mac mini under launchd next to its own engine (`docs/DEPLOY-MINI.md`); the laptop poster is stopped. The five hand-over rows were copied into the mini's `calls` table so nothing is re-posted.
+- Screenshot of the public preview (`t.me/s/stampede_calls`, 08:5x UTC): `docs/assets/calls/channel-2026-09-13.png`.
+- Gates at commit `6bc52cb`: `uv run pytest -q` 157 passed; the poster does not touch the web app (web lint/build/e2e last run green at `ec79b6c`).
+- Known: calls before the periodic `launch-intel` job had `launch: n/a`; the mini now recomputes launch facts every 10 minutes and the poster retries a miss after 120 s.
