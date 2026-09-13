@@ -121,6 +121,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mode", default="live", help="alert journal mode to report (default live)")
     p.add_argument("--notes", default="docs/TRACK-RECORD-notes.md", help="markdown file included verbatim as 'Run notes' when it exists (restarts, incidents, what changed)")
 
+    p = sub.add_parser("calls", help="STAMPEDE Calls: post the engine's edge_enter alerts, their +30/+60 outcomes and paper exits to the Telegram channel (docs/CALLS.md)")
+    p.add_argument("--api", default="http://127.0.0.1:8821", help="base URL of the running live engine")
+    p.add_argument("--config", default=None, help="rule config (default stampede/signals/calls-config.json)")
+    p.add_argument("--db", default=None, help="the live engine's store; the poster keeps its `calls` table there (default data/live-engine.sqlite)")
+    p.add_argument("--perf-json", default=None, help="where to keep post-latency p50/p95 (default data/calls-perf.json)")
+    p.add_argument("--dry-run", action="store_true", help="print messages instead of posting")
+    p.add_argument("--once", action="store_true", help="post the most recent alert of the rule from the journal as a format check and exit (not recorded)")
+    p.add_argument("--summary", action="store_true", help="post the daily summary now and exit")
+    p.add_argument("--delete", type=int, default=None, help="delete a message of the channel by id and exit")
+
     p = sub.add_parser("demo", help="replay the bundled recorded sample; no API keys needed")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8791)
@@ -176,6 +186,10 @@ def main(argv: list[str] | None = None) -> int:
         from .track_record import main_track_record
 
         return main_track_record(args)
+    if args.cmd == "calls":
+        from .calls.poster import main_calls
+
+        return main_calls(args)
     if args.cmd == "fx":
         from .context.fx import main_fx
 

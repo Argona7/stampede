@@ -1,0 +1,16 @@
+{
+  "rule": "edge_enter",
+  "min_p": 0.30,
+  "max_per_hour": 5,
+  "dedupe_s": 1800,
+  "skip_if": {
+    "launch_farm": true,
+    "bundle_n_gt": 4,
+    "dev_buy_share_gt": 0.10
+  },
+  "require_size_gt_0": true,
+  "catchup_s": 1800,
+  "summary_utc_hour": 9,
+  "ev_basis_quote": 0.02,
+  "note": "min_p 0.30 is the p(2x in 30 min) threshold of the 8-alerts/hour row of docs/RESEARCH-EDGE.md (42.5 % >= 2x on test, lift 7.9x); the engine's own edge_enter rule already fires at p >= 0.455 (5/h row), so today min_p only matters if the engine threshold is lowered. skip_if fields come from launch_intel; unknown facts (launch: n/a) do not skip."
+}
