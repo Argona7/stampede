@@ -8,6 +8,16 @@
   <img alt="chain 4663 (Robinhood Chain)" src="https://img.shields.io/badge/chain-4663-A3A3A3?style=flat-square&labelColor=050505">
 </p>
 
+## Official CA
+
+```text
+0xfe627506ca7c9ab80d8551c4e72bb4dca1b8ed64
+```
+
+**Anti-scam:** verify this exact address before interacting; ignore lookalike contracts and unsolicited links.
+
+[Website](https://stampede.tools) · [GMGN](https://gmgn.ai/r/cCloxCvz) · [Dexscreener search](https://dexscreener.com/search?q=0xfe627506ca7c9ab80d8551c4e72bb4dca1b8ed64) · [Robinhood Chain explorer](https://robinhoodchain.blockscout.com/address/0xfe627506ca7c9ab80d8551c4e72bb4dca1b8ed64)
+
 **See what wallets sold before they bought the next coin.**
 
 STAMPEDE is a read-only explorer of *observed* wallet rotations on supported Robinhood Chain venues
