@@ -69,7 +69,7 @@ file instead of shipping a multi-GB store.
 ```sh
 M=argona@100.122.123.37
 ssh $M 'cd ~/dev/stampede && git pull --ff-only && ~/.local/bin/uv sync && launchctl kickstart -k gui/$(id -u)/com.stampede.engine'
-ssh $M 'launchctl kickstart -k gui/$(id -u)/com.stampede.calls'      # when the poster is installed
+ssh $M 'launchctl kickstart -k gui/$(id -u)/com.stampede.calls'      # ALWAYS after an engine restart (see the resume issue below)
 ssh $M 'cd ~/dev/stampede/web && npm ci --no-audit --no-fund && npm run build'   # only when web/ changed, then kickstart the engine
 ```
 
@@ -144,6 +144,20 @@ Engine on the mini (`argona@100.122.123.37`, macOS 26.3, 10 cores / 16 GB, 40 GB
   an engine restart it backed off 1 -> 15 s and reconnected with `resume from <last id>`.
 - Web terminal built on the mini (`npm ci` 5 s, `npm run build` 3 s, `dist/` 1.5 MB), `/?view=signals` -> 200 over
   Tailscale.
+
+## Open issue: the poster's resume across an engine restart
+
+Observed 2026-09-13 08:20 UTC on the mini: the engine was restarted while the poster stayed up; the poster reconnected
+with `resume from 7614`, then dropped the stream 40 s later (`ConnectionError`, its read timeout) and reconnected. Cause,
+in `stampede/api/stream.py`: the event counter is per server process, so after a restart the new engine's ids start at
+1 while the client still sends `last_event_id=7614`. `bus.replay` reports no gap (`since_id < items[0].id - 1` is false
+for a large `since_id`), and the generator drops every live event with `id <= last_sent` (`last_sent = since`) - and
+sends no keepalive while it drops them. Until the new counter passes the old id the poster receives nothing: seconds
+after a short run, **hours after a day-long one** (~100 events/s). Neither side notices; no journal catch-up runs.
+Fix candidates (owner of `api/stream.py` / `calls/poster.py`): server - when `since > bus.last_id` treat it as a gap
+(`replay_gap: true`, `last_sent = 0`); poster - on the hello, if `data.last_event_id < self.last_id` the engine has
+restarted: forget `last_id`, run `catch_up()`, reconnect without `last_event_id`. Until then: **kickstart the poster
+after every engine restart** (the update recipe above does; a launchd crash-relaunch of the engine does not).
 
 ## Not done on the mini (yet)
 
