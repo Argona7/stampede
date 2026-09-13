@@ -403,6 +403,28 @@ def test_sse_ring_replays_from_last_event_id(tmp_path):
     assert [e.id for e in replay] == [6, 7, 8] and gap is False and bus.stats()["by_type"] == {"trade": 4, "block": 4}
 
 
+def test_sse_stale_last_event_id_after_restart(tmp_path):
+    """A client that survived a server restart resumes with an id larger than the new counter: the hello reports the gap
+    and the stream continues from the current position instead of dropping every event until the counter passes it."""
+    db = tmp_path / "s2.sqlite"
+    seeded_store(db).close()
+    app = create_app(mode="fixture", db=db, context_policy="off")
+    bus: Bus = app.state.bus
+    for i in range(1, 4):
+        bus.publish("alert", 100 + i, {"i": i})
+    assert bus.replay(7614) == ([], True) and bus.replay(3) == ([], False)
+    tc = TestClient(app)
+    import threading
+
+    t = threading.Timer(0.4, lambda: bus.publish("alert", 104, {"i": 4}))  # a live event with id 4 <= 7614 must still be delivered
+    t.start()
+    with tc.stream("GET", "/api/stream", headers={"Last-Event-ID": "7614"}, params={"limit": 1}) as r:
+        frames = parse_sse("".join(r.iter_text()))
+    t.join()
+    assert frames[0]["json"]["data"]["replay_gap"] is True and frames[0]["json"]["data"]["last_event_id"] == 3 and frames[0]["json"]["data"]["started_at"] == bus.created
+    assert [f["id"] for f in frames[1:]] == ["4"]
+
+
 def test_perf_endpoint_shape(tmp_path):
     db = tmp_path / "p.sqlite"
     seeded_store(db).close()

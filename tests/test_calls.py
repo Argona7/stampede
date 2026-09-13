@@ -316,10 +316,10 @@ def test_run_loop_resumes_and_reconnects(tmp_path):
     assert json.loads((tmp_path / "perf.json").read_text())["n"] == 2
 
 
-def test_replay_gap_triggers_journal_reread(tmp_path):
+def test_replay_gap_triggers_journal_reread_and_fresh_connect(tmp_path):
     now = 1789283300.0
     a1 = alert(clock=int(now) - 100)
-    api = FakeApiSession(alerts=[journal_row(a1, 1)], track=TRACK, stream=[hello(50, gap=True) + frame(51, "session", {"clock_ts": int(now)})])
+    api = FakeApiSession(alerts=[journal_row(a1, 1)], track=TRACK, stream=[hello(50, gap=True) + frame(51, "session", {"clock_ts": int(now)}), hello(50) + frame(51, "session", {"clock_ts": int(now)})])
     poster, tgs, api = make(tmp_path, api=api, now=now)
     poster.last_id = 5
     orig = poster.handle_frame
@@ -332,6 +332,39 @@ def test_replay_gap_triggers_journal_reread(tmp_path):
     poster.handle_frame = stop_after  # type: ignore[method-assign]
     poster.run()
     assert len(tgs.sent()) == 1 and sum("/api/alerts" in u for u in api.urls) == 2  # start-up catch-up + the gap re-read, one post
+    streams = [u for u in api.urls if "/api/stream" in u]
+    assert "last_event_id=5" in streams[0] and "last_event_id" not in streams[1] and poster.resyncs == 1 and poster.reconnects == 0  # reconnected at once without the stale id
+
+
+def test_engine_restart_resets_cursor(tmp_path):
+    """The engine process restarted: its counter starts at 1 while the poster still holds 7614. The hello's
+    `last_event_id` is behind ours (and `started_at` changed): drop the cursor, re-read the journal, reconnect fresh."""
+    now = 1789283300.0
+    a1 = alert(clock=int(now) - 100)
+    a2 = alert(clock=int(now) - 50, token="0x" + "d" * 40, symbol="AFTER")
+    old_hello = ["event: session", "data: " + json.dumps({"id": None, "type": "session", "ts_emit": 1.0, "block": None, "data": {"hello": True, "engine": "wss", "last_event_id": 7614, "replay_gap": False, "started_at": 1000.0}}), ""]
+    new_hello = lambda last: ["event: session", "data: " + json.dumps({"id": None, "type": "session", "ts_emit": 1.0, "block": None, "data": {"hello": True, "engine": "wss", "last_event_id": last, "replay_gap": False, "started_at": 2000.0}}), ""]
+    api = FakeApiSession(alerts=[journal_row(a1, 1)], track=TRACK, stream=[old_hello + frame(7614, "session", {"clock_ts": int(now)}), new_hello(40) + frame(41, "alert", a1), new_hello(41) + frame(42, "alert", a2)])
+    poster, tgs, api = make(tmp_path, api=api, now=now)
+    orig = poster.handle_frame
+
+    def stop_after(ev):
+        orig(ev)
+        if ev.get("id") == 42:
+            poster.stop = True
+
+    poster.handle_frame = stop_after  # type: ignore[method-assign]
+    poster.run()
+    streams = [u for u in api.urls if "/api/stream" in u]
+    assert len(streams) == 3 and "last_event_id" not in streams[0] and "last_event_id=7614" in streams[1] and "last_event_id" not in streams[2]
+    assert poster.resyncs == 1 and poster.reconnects == 1 and poster.server_started == 2000.0 and poster.last_id == 42
+    assert [p["text"].splitlines()[0] for p in tgs.sent()] == ["<b>ENTER STACK·39ac</b>", "<b>ENTER AFTER·dddd</b>"]
+    # an old server that only changed started_at (counter already past ours) is caught by started_at alone
+    p2, _, _ = make(tmp_path, now=now, store=CallsStore(tmp_path / "other.sqlite"))
+    p2.last_id, p2.server_started = 10, 1000.0
+    assert p2.check_hello({"hello": True, "last_event_id": 5000, "started_at": 3000.0}) is True and p2.last_id is None and p2.resyncs == 1
+    p2.last_id = 3
+    assert p2.check_hello({"hello": True, "last_event_id": 5001, "started_at": 3000.0}) is False and p2.last_id == 3
 
 
 def test_sse_frames_and_journal_shape():

@@ -84,8 +84,11 @@ class Bus:
         """Events with id > since_id still in the ring; `gap` is True when older events were already evicted."""
         with self._lock:
             items = list(self.ring)
+            last = self._id
+        if since_id > last:
+            return [], True  # an id from a previous server process (the counter restarts at 1): nothing to replay, the client must resync
         if not items:
-            return [], since_id < self._id
+            return [], since_id < last
         gap = since_id < items[0].id - 1
         out = [e for e in items if e.id > since_id and (types is None or e.type in types)]
         return out, gap

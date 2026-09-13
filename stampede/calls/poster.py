@@ -369,6 +369,8 @@ class Poster:
         self.skipped = 0
         self.printed: list[str] = []  # dry-run output, also inspected by tests
         self.session_state: dict[str, Any] = {}
+        self.server_started: float | None = None  # `started_at` of the engine process behind the last hello
+        self.resyncs = 0
 
     # ---- transport
     def link(self, message_id: int | None) -> str:
@@ -520,6 +522,28 @@ class Poster:
         return True
 
     # ---- the loop
+    def check_hello(self, d: dict[str, Any]) -> bool:
+        """True when the cursor must be dropped: the server reports a gap, its counter is behind ours (a new engine
+        process counts from 1) or its `started_at` changed. Old servers without the fix would silently drop every event
+        with `id <= Last-Event-ID` until their counter passed it, so the caller reconnects without an id."""
+        started = d.get("started_at")
+        srv_last = d.get("last_event_id")
+        reason = None
+        if d.get("replay_gap"):
+            reason = "replay gap"
+        elif self.last_id is not None and isinstance(srv_last, (int, float)) and srv_last < self.last_id:
+            reason = f"server counter {int(srv_last)} behind our {self.last_id}"
+        elif started is not None and self.server_started is not None and started != self.server_started:
+            reason = "engine restarted"
+        self.server_started = started if started is not None else self.server_started
+        if reason is None:
+            return False
+        self.resyncs += 1
+        log.warning("resync (%s): dropping Last-Event-ID %s, re-reading the journal", reason, self.last_id)
+        self.last_id = None
+        self.catch_up()
+        return True
+
     def stream_url(self) -> str:
         return f"{self.api}/api/stream?types={STREAM_TYPES}" + (f"&last_event_id={self.last_id}" if self.last_id is not None else "")
 
@@ -532,22 +556,24 @@ class Poster:
                 with self.s.get(self.stream_url(), stream=True, timeout=(6, 40), headers={"accept": "text/event-stream"}) as r:
                     if r.status_code != 200:
                         raise requests.HTTPError(f"HTTP {r.status_code} /api/stream")
-                    log.info("stream connected%s", f" (resume from {self.last_id})" if self.last_id is not None else "")
+                    resumed = self.last_id
+                    log.info("stream connected%s", f" (resume from {resumed})" if resumed is not None else "")
                     for ev in sse_frames(r.iter_lines(decode_unicode=True)):
                         if self.stop:
                             return
                         d = ev.get("data") or {}
                         if ev.get("type") == "session" and d.get("hello"):
                             fails = 0
-                            if d.get("replay_gap"):
-                                log.warning("replay gap: the ring no longer reaches %s; re-reading the journal", self.last_id)
-                                self.catch_up()
+                            if self.check_hello(d) and resumed is not None:
+                                break  # reconnect at once without the stale id (the server may be an old one that would drop everything)
                         try:
                             self.handle_frame(ev)
                         except Exception as e:  # noqa: BLE001 - one bad frame must not kill the stream
                             log.exception("frame %s failed: %s", ev.get("id"), e)
                         self.maybe_daily_summary()
-                    raise requests.ConnectionError("stream ended")
+                    else:
+                        raise requests.ConnectionError("stream ended")
+                    continue  # left the loop on purpose (resync): reconnect now, no backoff
             except (requests.RequestException, OSError) as e:
                 if self.stop:
                     return

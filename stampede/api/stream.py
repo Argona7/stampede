@@ -4,7 +4,10 @@ Contract (docs/ENGINE.md): every frame is `id: <monotonic>` / `event: <type>` / 
 `id`, `type`, `ts_emit`, `block` and the typed `data`. Types: block, trade, sequence, radar_delta, alert, verdict
 (reserved for Stage 4), session. A client that reconnects with `Last-Event-ID` (or `?last_event_id=`) gets every
 event it missed from the bounded ring (last 5,000); if the ring no longer holds them, the first frame is a `session`
-event with `replay_gap: true` so the client knows to refetch `/api/radar`. The first frame of every connection is a
+event with `replay_gap: true` so the client knows to refetch `/api/radar`. A `Last-Event-ID` larger than the server's
+counter (the client survived a server restart; every process counts from 1) is the same gap: the hello says
+`replay_gap: true` and the stream continues from the current position instead of dropping events until the new counter
+passes the old id. The hello also carries `started_at` of this process. The first frame of every connection is a
 `session` hello without an id (it does not move the client's Last-Event-ID). `?types=trade,alert` filters server-side,
 `?limit=N` closes the stream after N events (scripts, tests). Works in every mode: without the engine the bus only
 carries what the API publishes (nothing today), so fixture/replay clients see the hello and keepalives.
@@ -46,6 +49,7 @@ def install(app: FastAPI, state: dict[str, Any]) -> Bus:
                 "last_event_id": bus.last_id,
                 "replay_from": since,
                 "replay_gap": replay_gap,
+                "started_at": bus.created,  # this server process; a client whose Last-Event-ID comes from another process must resync
                 "types": list(EVENT_TYPES),
                 "hello": True,
             },
@@ -69,9 +73,11 @@ def install(app: FastAPI, state: dict[str, Any]) -> Bus:
             sent = 0
             sub = bus.subscribe(loop, q, wanted)  # subscribe first: nothing published during the replay is lost
             replay, gap = bus.replay(since, wanted) if since is not None else ([], False)
+            stale = since is not None and since > bus.last_id  # an id of a previous server process: the counter restarted at 1
             try:
                 yield hello(gap, since)
-                last_sent = since or 0
+                # a stale id would otherwise make `ev.id <= last_sent` drop every live event until the new counter passes it
+                last_sent = 0 if stale else (since or 0)
                 for ev in replay:
                     yield ev.sse
                     last_sent = ev.id
