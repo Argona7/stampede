@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- STAMPEDE live engine on the Mac mini (docs/DEPLOY-MINI.md). __HOME__ is replaced by deploy/mini/install.sh.
+         --host 0.0.0.0 so the web terminal answers on the Tailscale address (http://100.122.123.37:8821/); the poster
+         uses 127.0.0.1. -->
+    <key>Label</key>
+    <string>com.stampede.engine</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/dev/stampede/.venv/bin/python</string>
+        <string>-m</string>
+        <string>stampede</string>
+        <string>serve</string>
+        <string>--mode</string>
+        <string>live</string>
+        <string>--feed</string>
+        <string>wss</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>8821</string>
+        <string>--db</string>
+        <string>data/live-engine.sqlite</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/dev/stampede</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+        <key>OMP_WAIT_POLICY</key>
+        <string>PASSIVE</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- relaunch after a crash or a kickstart -k; a clean exit (code 0) stays down -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <!-- SIGTERM, then SIGKILL after 10 s: never two engines on one store (docs/ENGINE.md, known limits) -->
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-engine.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-engine.log</string>
+</dict>
+</plist>

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- STAMPEDE Telegram calls poster on the Mac mini (docs/DEPLOY-MINI.md). __HOME__ is replaced by deploy/mini/install.sh.
+         Installed only with `install.sh --with-calls`: it needs `stampede calls` in the checkout and the engine on :8821. -->
+    <key>Label</key>
+    <string>com.stampede.calls</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HOME__/dev/stampede/.venv/bin/python</string>
+        <string>-m</string>
+        <string>stampede.cli</string>
+        <string>calls</string>
+        <string>--api</string>
+        <string>http://127.0.0.1:8821</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__/dev/stampede</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>15</integer>
+
+    <key>ExitTimeOut</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-calls.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/dev/stampede/data/launchd-calls.log</string>
+</dict>
+</plist>
